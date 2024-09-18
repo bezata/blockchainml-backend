@@ -3,7 +3,7 @@ import { app } from "../src/index";
 
 describe("BlockchainML API", () => {
   test("GET / returns welcome message", async () => {
-    const response = await app.handle(new Request("http://localhost/"));
+    const response = await app.handle(new Request("http://localhost:3000/"));
     expect(response.status).toBe(200);
     const text = await response.text();
     expect(text).toBe("Welcome to BlockchainML API");
@@ -11,7 +11,7 @@ describe("BlockchainML API", () => {
 
   test("POST /api/v1/users/register creates a new user and returns API key", async () => {
     const response = await app.handle(
-      new Request("http://localhost/api/v1/users/register", {
+      new Request("http://localhost:3000/api/v1/users/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -30,7 +30,7 @@ describe("BlockchainML API", () => {
 
   test("GET /api/v1/datasets returns 401 without API key", async () => {
     const response = await app.handle(
-      new Request("http://localhost/api/v1/datasets")
+      new Request("http://localhost:3000/api/v1/datasets")
     );
     expect(response.status).toBe(401);
     const json = await response.json();
@@ -40,7 +40,7 @@ describe("BlockchainML API", () => {
   test("GET /api/v1/datasets returns 200 with valid API key", async () => {
     // First, register a new user to get a valid API key
     const registerResponse = await app.handle(
-      new Request("http://localhost/api/v1/users/register", {
+      new Request("http://localhost:3000/api/v1/users/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
