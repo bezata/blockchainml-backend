@@ -16,6 +16,7 @@
     "@prisma/client": "^5.19.1",
     "dotenv": "^16.4.5",
     "elysia": "^1.1.12",
+    "elysia-rate-limit": "^4.1.0",
     "prisma": "^5.19.1",
     "xss": "^1.0.15"
   },

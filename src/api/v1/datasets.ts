@@ -143,8 +143,8 @@ const deleteDatasetHandler = async ({ params }: { params: { id: string } }) => {
     });
     if (!dataset) throw new AppError("Dataset not found", 404);
 
-    if (dataset.fileUrl) {
-      await cloudflareR2Service.deleteFile(dataset.fileUrl);
+    if (dataset.fileKey) {
+      await cloudflareR2Service.deleteFile(dataset.fileKey);
     }
 
     await prisma.dataset.delete({ where: { id: params.id } });
