@@ -56,6 +56,7 @@ function parseChainId(chainId: string | number): string {
 }
 
 export const authRouter = new Elysia({ prefix: "/users" })
+  .use(rateLimit())
   .onError(({ code, error, set }) => {
     console.error("Error in authRouter:", error);
     if (error instanceof UnauthorizedError) {
@@ -98,6 +99,24 @@ export const authRouter = new Elysia({ prefix: "/users" })
               walletAddress: ethAddress,
               chainId,
               apiKey: await bcrypt.hash(newApiKey, 10),
+              name: "",
+              email: "",
+              bio: "",
+              avatar: "",
+              language: "english",
+              theme: "light",
+              notifications: {
+                email: false,
+                push: false,
+                sms: false,
+              },
+              privacy: {
+                profileVisibility: "public",
+                showEmail: false,
+              },
+              twoFactor: false,
+              defaultPaymentAddress: "",
+              paymentAddress: "",
             },
           });
           return { ...user, apiKey: newApiKey };
@@ -121,6 +140,7 @@ export const authRouter = new Elysia({ prefix: "/users" })
   );
 
 export const authMiddleware = new Elysia()
+  .use(rateLimit())
   .onError(({ error, set }) => {
     console.error("Error in authMiddleware:", error);
     if (error instanceof UnauthorizedError) {
