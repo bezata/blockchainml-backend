@@ -1,61 +1,96 @@
 import { Elysia } from "elysia";
 import { swagger } from "@elysiajs/swagger";
 import { cors } from "@elysiajs/cors";
-import { websocket } from "@elysiajs/websocket";
 import dotenv from "dotenv";
 import { opentelemetry } from "@elysiajs/opentelemetry";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
+import { PrismaClient } from "@prisma/client";
 import { datasetsRouter } from "./api/v1/datasets";
 import { trendingRouter } from "./api/v1/trending";
 import { usersRouter } from "./api/v1/users";
-import { authRouter, authMiddleware } from "./api/v1/auth";
+import { authRouter, requireAuth } from "./api/v1/auth";
 import { userSettingsRouter } from "./api/v1/userSettings";
-import { forumRouter } from "./api/v1/forum";
 import { errorHandler, AppError } from "./utils/errorHandler";
 import { logger } from "./utils/monitor";
+import { userProfileRouter } from "./api/v1/userProfile";
 
 dotenv.config();
 
-export const app = new Elysia()
-  .use(
-    opentelemetry({
-      serviceName: "blockchainml-api",
-      instrumentations: [getNodeAutoInstrumentations()],
-    })
-  )
-  .use(authMiddleware)
-  .use(swagger())
-  .use(cors())
-  .use(errorHandler)
-  .use(websocket())
-  .ws("/ws", {
-    message(ws, message) {
-      // Handle incoming WebSocket messages
-      console.log("Received message:", message);
-    },
-  })
-  .get("/", () => "Welcome to BlockchainML API")
-  .group("/api/v1", (app) =>
-    app
-      .use(usersRouter)
-      .use(datasetsRouter)
-      .use(trendingRouter)
-      .use(authRouter)
-      .use(userSettingsRouter)
-      .use(forumRouter)
-  )
-  .onError(({ code, error }) => {
-    logger.error(`Unhandled error: ${code}`, {
-      error: error.message,
-      stack: error.stack,
-    });
-    if (error instanceof AppError) {
-      return { error: error.message, status: error.statusCode };
-    }
-    return { error: "An unexpected error occurred", status: 500 };
-  })
-  .listen(process.env.PORT || 4000);
+const prisma = new PrismaClient();
 
-logger.info(
-  `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
-);
+async function connectPrisma() {
+  try {
+    await prisma.$connect();
+    logger.info("Successfully connected to Prisma");
+  } catch (error) {
+    logger.error("Failed to connect to Prisma:", error);
+    process.exit(1);
+  }
+}
+
+async function startServer() {
+  await connectPrisma();
+
+  const app = new Elysia()
+    .use(cors())
+    .use(
+      opentelemetry({
+        serviceName: "blockchainml-api",
+        instrumentations: [getNodeAutoInstrumentations()],
+      })
+    )
+    .use(swagger())
+    .use(errorHandler)
+    .use((app) =>
+      app.onRequest((context) => {
+        logger.info(
+          `Incoming request: ${context.request.method} ${context.request.url}`
+        );
+      })
+    )
+    .get("/", () => "Welcome to BlockchainML API")
+    .group("/api/v1", (app) =>
+      app
+        .use(authRouter)
+        .group("/user-settings", (app) =>
+          app.use(requireAuth).use(userSettingsRouter)
+        )
+        .group(
+          "/user",
+          (
+            app // Added user profile routes
+          ) => app.use(requireAuth).use(userProfileRouter)
+        )
+        .use(usersRouter)
+        .use(datasetsRouter)
+        .use(trendingRouter)
+    )
+    .onError(({ code, error }) => {
+      logger.error(`Unhandled error: ${code}`, {
+        error: error.message,
+        stack: error.stack,
+      });
+      if (error instanceof AppError) {
+        return { error: error.message, status: error.statusCode };
+      }
+      return { error: "An unexpected error occurred", status: 500 };
+    })
+    .listen(process.env.PORT || 4000);
+
+  logger.info(
+    `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
+  );
+
+  return app;
+}
+
+startServer().catch((error) => {
+  logger.error("Failed to start server:", error);
+  process.exit(1);
+});
+
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  await prisma.$disconnect();
+  process.exit(0);
+});

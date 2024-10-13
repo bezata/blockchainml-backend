@@ -18,6 +18,8 @@ export class UserService {
         email,
         name,
         apiKey,
+        walletAddress: walletAddress,
+        chainId: chainId,
       },
     });
     return { user, apiKey };

@@ -1,94 +1,119 @@
-import { Elysia, t } from "elysia";
-import { PrismaClient } from "@prisma/client";
-import crypto from "crypto";
-import bcrypt from "bcrypt";
+import { Elysia } from "elysia";
+import prisma from "../../middleware/prismaclient";
+import { logger } from "../../utils/monitor";
+import { AuthError, requireAuth } from "./auth";
+import { Prisma } from "@prisma/client";
 
-const prisma = new PrismaClient();
+export const userSettingsRouter = new Elysia()
+  .use(requireAuth)
+  .get("/", async (context) => {
+    console.log(
+      "User settings GET - Full context:",
+      JSON.stringify(context, null, 2)
+    );
 
-function generateApiKey(): string {
-  return crypto.randomBytes(32).toString("hex");
-}
+    const userAddress = context.headers["x-user-address"];
+    console.log("User settings GET - User address from header:", userAddress);
 
-export const userSettingsRouter = new Elysia({ prefix: "/user-settings" })
-  .use((app) =>
-    app.derive(async ({ request }) => {
-      const authHeader = request.headers.get("Authorization");
-      if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        throw new Error("Unauthorized");
-      }
-      const userId = authHeader.split(" ")[1];
-      const user = await prisma.user.findUnique({ where: { id: userId } });
-      if (!user) {
-        throw new Error("User not found");
-      }
-      return { user };
-    })
-  )
-  .get("/", async ({ user }) => {
-    console.log("Fetching user settings for user:", user.id);
-    return user;
-  })
-  .patch(
-    "/",
-    async ({ user, body }) => {
-      console.log("Updating user settings for user:", user.id);
-      console.log("Update data:", body);
-      try {
-        const updatedUser = await prisma.user.update({
-          where: { id: user.id },
-          data: body,
-        });
-        console.log("User settings updated successfully");
-        return updatedUser;
-      } catch (error) {
-        console.error("Error updating user settings:", error);
-        throw new Error(`Failed to update user settings: ${error.message}`);
-      }
-    },
-    {
-      body: t.Object({
-        name: t.Optional(t.String()),
-        email: t.Optional(t.String()),
-        bio: t.Optional(t.String()),
-        avatar: t.Optional(t.String()),
-        language: t.Optional(t.String()),
-        theme: t.Optional(t.String()),
-        notifications: t.Optional(
-          t.Object({
-            email: t.Boolean(),
-            push: t.Boolean(),
-            sms: t.Boolean(),
-          })
-        ),
-        privacy: t.Optional(
-          t.Object({
-            profileVisibility: t.String(),
-            showEmail: t.Boolean(),
-          })
-        ),
-        twoFactor: t.Optional(t.Boolean()),
-        defaultPaymentAddress: t.Optional(t.String()),
-        paymentAddress: t.Optional(t.String()),
-      }),
+    if (!userAddress) {
+      logger.error("User settings GET - No user address in header");
+      throw new AuthError(401, "No user address provided");
     }
-  )
-  .post("/renew-api-key", async ({ user }) => {
-    console.log("Renewing API key for user:", user.id);
-    try {
-      const newApiKey = generateApiKey();
-      const hashedApiKey = await bcrypt.hash(newApiKey, 10);
 
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { apiKey: hashedApiKey },
+    try {
+      const userSettings = await prisma.user.findUnique({
+        where: { walletAddress: userAddress },
+        select: {
+          walletAddress: true,
+          name: true,
+          email: true,
+          bio: true,
+          avatar: true,
+          chainId: true,
+          language: true,
+          theme: true,
+          notifications: true,
+          privacy: true,
+          twoFactor: true,
+          defaultPaymentAddress: true,
+          paymentAddress: true,
+        },
       });
 
-      console.log("API key renewed successfully");
-      return { apiKey: newApiKey };
+      console.log(
+        "User settings GET - Database query result:",
+        JSON.stringify(userSettings, null, 2)
+      );
+
+      if (!userSettings) {
+        logger.warn(`User settings not found for ${userAddress}`);
+        throw new AuthError(404, "User settings not found");
+      }
+
+      logger.info(`User settings fetched successfully for ${userAddress}`);
+      return userSettings;
     } catch (error) {
-      console.error("Error renewing API key:", error);
-      throw new Error(`Failed to renew API key: ${error.message}`);
+      logger.error(`Error fetching user settings for ${userAddress}:`, error);
+      if (error instanceof AuthError) throw error;
+      throw new AuthError(500, "Failed to fetch user settings");
     }
+  })
+  .put("/", async (context) => {
+    const userAddress = context.headers["x-user-address"];
+    if (!userAddress) {
+      logger.error("User settings PUT - No user address in header");
+      throw new AuthError(401, "No user address provided");
+    }
+
+    const updatedSettings = context.body as {
+      name?: string;
+      email?: string;
+      bio?: string;
+      avatar?: string;
+      chainId?: number;
+      language?: string;
+      theme?: string;
+      notifications?: boolean;
+      privacy?: any;
+      twoFactor?: boolean;
+      defaultPaymentAddress?: string;
+      paymentAddress?: string;
+    };
+
+    try {
+      const userSettings = await prisma.user.update({
+        where: { walletAddress: userAddress },
+        data: updatedSettings as Prisma.UserUpdateInput,
+        select: {
+          walletAddress: true,
+          name: true,
+          email: true,
+          bio: true,
+          avatar: true,
+          chainId: true,
+          language: true,
+          theme: true,
+          notifications: true,
+          privacy: true,
+          twoFactor: true,
+          defaultPaymentAddress: true,
+          paymentAddress: true,
+        },
+      });
+
+      logger.info(`User settings updated successfully for ${userAddress}`);
+      return userSettings;
+    } catch (error) {
+      logger.error(`Error updating user settings for ${userAddress}:`, error);
+      throw new AuthError(500, "Failed to update user settings");
+    }
+  })
+  .onError(({ error }) => {
+    logger.error("Unexpected error in user settings router:", error);
+    if (error instanceof AuthError) {
+      return { error: error.message, status: error.statusCode };
+    }
+    return { error: "An unexpected error occurred", status: 500 };
   });
 
 export default userSettingsRouter;

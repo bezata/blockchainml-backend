@@ -1,11 +1,11 @@
 import winston from "winston";
-import expressStatusMonitor from "express-status-monitor";
 
 // Configure Winston logger
 export const logger = winston.createLogger({
-  level: "info",
+  level: process.env.LOG_LEVEL || "info",
   format: winston.format.combine(
     winston.format.timestamp(),
+    winston.format.errors({ stack: true }),
     winston.format.json()
   ),
   transports: [
@@ -17,10 +17,17 @@ export const logger = winston.createLogger({
 if (process.env.NODE_ENV !== "production") {
   logger.add(
     new winston.transports.Console({
-      format: winston.format.simple(),
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.simple()
+      ),
     })
   );
 }
 
-// Configure express-status-monitor
-export const statusMonitor = expressStatusMonitor();
+// Helper function to stringify objects for logging
+export const stringifyForLog = (obj: any) => {
+  return JSON.stringify(obj, (key, value) =>
+    typeof value === "bigint" ? value.toString() : value
+  );
+};
