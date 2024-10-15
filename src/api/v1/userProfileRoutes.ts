@@ -1,7 +1,7 @@
 import { Elysia, t } from "elysia";
 import prisma from "../../middleware/prismaclient";
 import { logger } from "../../utils/monitor";
-import { AuthError, requireAuth } from "./auth";
+import { authPlugin, AuthError } from "../../middleware/authPlugin";
 import { Prisma } from "@prisma/client";
 
 type UserProfile = {
@@ -18,28 +18,19 @@ type UserProfile = {
   twoFactor: boolean;
   defaultPaymentAddress: string | null;
   paymentAddress: string | null;
-  profileVisibility: Prisma.JsonValue;
 };
 
 export const userProfileRouter = new Elysia({ prefix: "/user" })
-  .use(requireAuth)
-  .get("/profile", async (context) => {
-    logger.debug(
-      "User profile GET - Full context:",
-      JSON.stringify(context, null, 2)
-    );
-
-    const userAddress = context.headers["x-user-address"];
-    logger.debug("User profile GET - User address from header:", userAddress);
-
-    if (!userAddress) {
-      logger.error("User profile GET - No user address in header");
-      throw new AuthError(401, "No user address provided");
+  .use(authPlugin)
+  .get("/profile", async ({ authenticatedUser }) => {
+    if (!authenticatedUser) {
+      logger.error("User profile GET - No authenticated user");
+      throw new AuthError(401, "Authentication required");
     }
 
     try {
       const userProfile = await prisma.user.findUnique({
-        where: { walletAddress: userAddress },
+        where: { walletAddress: authenticatedUser.walletAddress },
         select: {
           walletAddress: true,
           name: true,
@@ -57,35 +48,30 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
         },
       });
 
-      logger.debug(
-        "User profile GET - Database query result:",
-        JSON.stringify(userProfile, null, 2)
-      );
-
       if (!userProfile) {
-        logger.warn(`User profile not found for ${userAddress}`);
+        logger.warn(
+          `User profile not found for ${authenticatedUser.walletAddress}`
+        );
         throw new AuthError(404, "User profile not found");
       }
 
-      logger.info(`User profile fetched successfully for ${userAddress}`);
+      logger.info(
+        `User profile fetched successfully for ${authenticatedUser.walletAddress}`
+      );
       return userProfile as UserProfile;
     } catch (error) {
-      logger.error(`Error fetching user profile for ${userAddress}:`, error);
+      logger.error(
+        `Error fetching user profile for ${authenticatedUser.walletAddress}:`,
+        error
+      );
       if (error instanceof AuthError) throw error;
       throw new AuthError(500, "Failed to fetch user profile");
     }
   })
-  .get("/profile/:walletAddress", async (context) => {
-    const { walletAddress } = context.params;
-    const currentUserAddress = context.headers["x-user-address"];
-
-    logger.debug(
-      `User profile GET for ${walletAddress} - Current user: ${currentUserAddress}`
-    );
-
+  .get("/profile/:walletAddress", async ({ params, authenticatedUser }) => {
     try {
       const profileUser = await prisma.user.findUnique({
-        where: { walletAddress },
+        where: { walletAddress: params.walletAddress },
         select: {
           walletAddress: true,
           name: true,
@@ -98,11 +84,12 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
       });
 
       if (!profileUser) {
-        logger.warn(`User not found: ${walletAddress}`);
+        logger.warn(`User not found: ${params.walletAddress}`);
         throw new AuthError(404, "User not found");
       }
 
-      const isOwnProfile = currentUserAddress === profileUser.walletAddress;
+      const isOwnProfile =
+        authenticatedUser?.walletAddress === profileUser.walletAddress;
       const privacy = profileUser.privacy as {
         profileVisibility?: "public" | "private";
       };
@@ -128,29 +115,26 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
 
       return publicProfile;
     } catch (error) {
-      logger.error(`Error fetching user profile for ${walletAddress}:`, error);
+      logger.error(
+        `Error fetching user profile for ${params.walletAddress}:`,
+        error
+      );
       if (error instanceof AuthError) throw error;
       throw new AuthError(500, "Failed to fetch user profile");
     }
   })
   .patch(
     "/profile",
-    async (context) => {
-      const userAddress = context.headers["x-user-address"];
-      logger.debug(
-        "User profile PATCH - User address from header:",
-        userAddress
-      );
-
-      if (!userAddress) {
-        logger.error("User profile PATCH - No user address in header");
-        throw new AuthError(401, "No user address provided");
+    async ({ authenticatedUser, body }) => {
+      if (!authenticatedUser) {
+        logger.error("User profile PATCH - No authenticated user");
+        throw new AuthError(401, "Authentication required");
       }
 
       try {
         const updatedUser = await prisma.user.update({
-          where: { walletAddress: userAddress },
-          data: context.body,
+          where: { walletAddress: authenticatedUser.walletAddress },
+          data: body,
           select: {
             walletAddress: true,
             name: true,
@@ -167,10 +151,15 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
             paymentAddress: true,
           },
         });
-        logger.info(`User profile updated successfully for ${userAddress}`);
+        logger.info(
+          `User profile updated successfully for ${authenticatedUser.walletAddress}`
+        );
         return updatedUser as UserProfile;
       } catch (error) {
-        logger.error(`Error updating user profile for ${userAddress}:`, error);
+        logger.error(
+          `Error updating user profile for ${authenticatedUser.walletAddress}:`,
+          error
+        );
         throw new AuthError(500, "Failed to update user profile");
       }
     },

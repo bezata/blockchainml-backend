@@ -8,11 +8,12 @@ import { PrismaClient } from "@prisma/client";
 import { datasetsRouter } from "./api/v1/datasets";
 import { trendingRouter } from "./api/v1/trending";
 import { usersRouter } from "./api/v1/users";
-import { authRouter, requireAuth } from "./api/v1/auth";
+import { authRouter } from "./api/v1/auth";
 import { userSettingsRouter } from "./api/v1/userSettings";
 import { errorHandler, AppError } from "./utils/errorHandler";
 import { logger } from "./utils/monitor";
-import { userProfileRouter } from "./api/v1/userProfile";
+import { userProfileRouter } from "./api/v1/userProfileRoutes";
+import { authPlugin } from "./middleware/authPlugin";
 
 dotenv.config();
 
@@ -53,14 +54,9 @@ async function startServer() {
       app
         .use(authRouter)
         .group("/user-settings", (app) =>
-          app.use(requireAuth).use(userSettingsRouter)
+          app.use(authPlugin).use(userSettingsRouter)
         )
-        .group(
-          "/user",
-          (
-            app // Added user profile routes
-          ) => app.use(requireAuth).use(userProfileRouter)
-        )
+        .group("/user", (app) => app.use(authPlugin).use(userProfileRouter))
         .use(usersRouter)
         .use(datasetsRouter)
         .use(trendingRouter)
