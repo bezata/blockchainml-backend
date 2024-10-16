@@ -13,8 +13,8 @@ type UserProfile = {
   chainId: string;
   language: string | null;
   theme: string | null;
-  notifications: any | null;
-  privacy: Prisma.JsonValue;
+  notifications: Prisma.JsonValue | null;
+  privacy: Prisma.JsonValue | null;
   twoFactor: boolean;
   defaultPaymentAddress: string | null;
   paymentAddress: string | null;
@@ -92,7 +92,7 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
         authenticatedUser?.walletAddress === profileUser.walletAddress;
       const privacy = profileUser.privacy as {
         profileVisibility?: "public" | "private";
-      };
+      } | null;
       const isPublic = privacy?.profileVisibility === "public";
 
       const publicProfile = {
@@ -132,9 +132,28 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
       }
 
       try {
+        // Only update fields that are provided in the request body
         const updatedUser = await prisma.user.update({
           where: { walletAddress: authenticatedUser.walletAddress },
-          data: body,
+          data: {
+            ...(body.name !== undefined && { name: body.name }),
+            ...(body.email !== undefined && { email: body.email }),
+            ...(body.bio !== undefined && { bio: body.bio }),
+            ...(body.avatar !== undefined && { avatar: body.avatar }),
+            ...(body.language !== undefined && { language: body.language }),
+            ...(body.theme !== undefined && { theme: body.theme }),
+            ...(body.notifications !== undefined && {
+              notifications: body.notifications,
+            }),
+            ...(body.privacy !== undefined && { privacy: body.privacy }),
+            ...(body.twoFactor !== undefined && { twoFactor: body.twoFactor }),
+            ...(body.defaultPaymentAddress !== undefined && {
+              defaultPaymentAddress: body.defaultPaymentAddress,
+            }),
+            ...(body.paymentAddress !== undefined && {
+              paymentAddress: body.paymentAddress,
+            }),
+          },
           select: {
             walletAddress: true,
             name: true,
@@ -164,19 +183,21 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
       }
     },
     {
-      body: t.Object({
-        name: t.Optional(t.String()),
-        email: t.Optional(t.String()),
-        bio: t.Optional(t.String()),
-        avatar: t.Optional(t.String()),
-        language: t.Optional(t.String()),
-        theme: t.Optional(t.String()),
-        notifications: t.Optional(t.Object({})),
-        privacy: t.Optional(t.Object({})),
-        twoFactor: t.Optional(t.Boolean()),
-        defaultPaymentAddress: t.Optional(t.String()),
-        paymentAddress: t.Optional(t.String()),
-      }),
+      body: t.Partial(
+        t.Object({
+          name: t.String(),
+          email: t.String(),
+          bio: t.String(),
+          avatar: t.String(),
+          language: t.String(),
+          theme: t.String(),
+          notifications: t.Object({}),
+          privacy: t.Object({}),
+          twoFactor: t.Boolean(),
+          defaultPaymentAddress: t.String(),
+          paymentAddress: t.String(),
+        })
+      ),
     }
   )
   .onError(({ error }) => {
