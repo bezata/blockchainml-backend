@@ -8,28 +8,81 @@ generator client {
 }
 
 model User {
-  walletAddress         String    @id @map("_id")
+  id                    String         @id @default(auto()) @map("_id") @db.ObjectId
+  walletAddress         String         @unique
   chainId               String
-  apiKey                String    @unique
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  apiKey                String         @unique
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  username              String         @unique
   name                  String?
-  email                 String?
+  email                 String?       
   bio                   String?
   avatar                String?
   language              String?
   theme                 String?
-  notifications         Json?
-  privacy               Json?
-  twoFactor             Boolean   @default(false)
+  githubProfileLink     String?
+  xProfileLink          String?
   defaultPaymentAddress String?
-  paymentAddress        String?
+  selectedPaymentAddress String?
+  twoFactorEnabled      Boolean        @default(false)
+  notificationPreferences NotificationPreferences?
+  privacySettings       PrivacySettings?
+  projects              Project[]
+  repositories          Repository[]
+  monetizationSettings  MonetizationSettings?
   datasets              Dataset[]
   posts                 Post[]
   comments              Comment[]
   sessions              Session[]
+  refreshTokens         RefreshToken[]
+  lastLoginAt           DateTime?
 
-  @@unique([walletAddress, email])
+  @@index([email])
+}
+
+model NotificationPreferences {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String   @unique @db.ObjectId
+  user              User     @relation(fields: [userId], references: [id])
+  emailNotifications Boolean  @default(true)
+}
+
+model PrivacySettings {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String   @unique @db.ObjectId
+  user              User     @relation(fields: [userId], references: [id])
+  profileVisibility String   @default("public")
+  showEmail         Boolean  @default(false)
+}
+
+model Project {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  description String?
+  link        String?
+  userId      String   @db.ObjectId
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model Repository {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  link        String
+  userId      String   @db.ObjectId
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model MonetizationSettings {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String   @unique @db.ObjectId
+  user              User     @relation(fields: [userId], references: [id])
+  paymentMethod     String?
+  subscriptionTier  String?
 }
 
 model Dataset {
@@ -85,13 +138,32 @@ model Comment {
 }
 
 model Session {
-  id                String   @id @default(auto()) @map("_id") @db.ObjectId
-  userWalletAddress String
-  token             String   @unique
-  createdAt         DateTime @default(now())
-  expiresAt         DateTime
-  user              User     @relation(fields: [userWalletAddress], references: [walletAddress])
+  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
+  userWalletAddress   String
+  user                User     @relation(fields: [userWalletAddress], references: [walletAddress])
+  token               String   @unique
+  createdAt           DateTime @default(now())
+  expiresAt           DateTime
+  lastActivity        DateTime @default(now())
+  ipAddress           String?
+  userAgent           String?
+  deviceInfo          Json?
+  isValid             Boolean  @default(true)
 
   @@index([userWalletAddress])
+  @@index([expiresAt])
+  @@index([isValid])
+}
+
+model RefreshToken {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  token         String   @unique
+  userId        String   @db.ObjectId
+  user          User     @relation(fields: [userId], references: [id])
+  createdAt     DateTime @default(now())
+  expiresAt     DateTime
+  isRevoked     Boolean  @default(false)
+
+  @@index([userId])
   @@index([expiresAt])
 }

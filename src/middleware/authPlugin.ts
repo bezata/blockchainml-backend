@@ -1,6 +1,6 @@
 import jwt from "@elysiajs/jwt";
 import Elysia from "elysia";
-import { PrismaClient, User } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import { logger } from "../utils/monitor";
 
 const prisma = new PrismaClient();
@@ -68,6 +68,21 @@ export const authPlugin = (app: Elysia) =>
           authenticatedUser: {
             walletAddress: user.walletAddress,
             chainId: user.chainId,
+            apiKey: user.apiKey,
+            username: user.username,
+            avatar: user.avatar,
+            bio: user.bio,
+            email: user.email,
+            language: user.language,
+            theme: user.theme,
+            twoFactorEnabled: user.twoFactorEnabled,
+            defaultPaymentAddress: user.defaultPaymentAddress,
+            selectedPaymentAddress: user.selectedPaymentAddress,
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt,
+            lastLoginAt: user.lastLoginAt,
+            name: user.name,
+            id: user.id,
           },
         };
       } catch (error) {
