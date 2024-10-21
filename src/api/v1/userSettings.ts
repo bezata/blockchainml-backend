@@ -1,17 +1,36 @@
-import { Elysia, t, ParseError } from "elysia";
+import { Elysia, t } from "elysia";
 import { authPlugin, AuthError } from "../../middleware/authPlugin";
 import prisma from "../../middleware/prismaclient";
 import { logger } from "../../utils/monitor";
 import crypto from "crypto";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
+import { rateLimiter } from "../../utils/rateLimit";
+import { isValidEmail, sanitizeInput } from "../../utils/security";
+import { redactSensitiveInfo } from "../../utils/security";
+
+const handlePrismaError = (error: unknown, operation: string) => {
+  if (error instanceof PrismaClientKnownRequestError) {
+    if (error.code === "P2002") {
+      throw new AuthError(409, "Unique constraint violation");
+    }
+    if (error.code === "P2025") {
+      throw new AuthError(404, "Record not found");
+    }
+  }
+  logger.error(`Error in ${operation}:`, error);
+  throw new AuthError(500, `Failed to ${operation}`);
+};
 
 const userSettingsSchema = t.Object({
-  username: t.Optional(t.String()),
-  name: t.Optional(t.String()),
-  email: t.Optional(t.String()),
-  bio: t.Optional(t.String()),
+  username: t.Optional(t.String({ minLength: 3, maxLength: 30 })),
+  name: t.Optional(t.String({ maxLength: 100 })),
+  email: t.Optional(t.String({ validate: isValidEmail })),
+  bio: t.Optional(t.String({ maxLength: 500 })),
   avatar: t.Optional(t.String()),
   language: t.Optional(t.String()),
   theme: t.Optional(t.String()),
+  githubProfileLink: t.Optional(t.String()),
+  xProfileLink: t.Optional(t.String()),
   notificationPreferences: t.Optional(
     t.Object({
       emailNotifications: t.Boolean(),
@@ -28,7 +47,6 @@ const userSettingsSchema = t.Object({
   selectedPaymentAddress: t.Optional(t.String()),
 });
 
-// Add this type definition
 const renewApiKeySchema = t.Object({
   action: t.Literal("renew-api-key"),
 });
@@ -57,12 +75,15 @@ export const userSettingsRouter = new Elysia()
           chainId: true,
           language: true,
           theme: true,
+          githubProfileLink: true,
+          xProfileLink: true,
           notificationPreferences: true,
           privacySettings: true,
           twoFactorEnabled: true,
           defaultPaymentAddress: true,
           selectedPaymentAddress: true,
           apiKey: true,
+          lastLoginAt: true,
         },
       });
 
@@ -72,11 +93,9 @@ export const userSettingsRouter = new Elysia()
       }
 
       logger.info(`User settings fetched successfully for ${userAddress}`);
-      return userSettings;
+      return redactSensitiveInfo(userSettings);
     } catch (error) {
-      logger.error(`Error fetching user settings for ${userAddress}:`, error);
-      if (error instanceof AuthError) throw error;
-      throw new AuthError(500, "Failed to fetch user settings");
+      handlePrismaError(error, "fetch user settings");
     }
   })
   .put(
@@ -90,16 +109,18 @@ export const userSettingsRouter = new Elysia()
       const userAddress = authenticatedUser.walletAddress;
       logger.info(`User settings PUT - User address: ${userAddress}`);
 
+      const sanitizedBody = sanitizeInput(body);
+
       try {
         const userSettings = await prisma.user.update({
           where: { walletAddress: userAddress },
           data: {
-            ...body,
-            notificationPreferences: body.notificationPreferences
-              ? { update: body.notificationPreferences }
+            ...sanitizedBody,
+            notificationPreferences: sanitizedBody.notificationPreferences
+              ? { update: sanitizedBody.notificationPreferences }
               : undefined,
-            privacySettings: body.privacySettings
-              ? { update: body.privacySettings }
+            privacySettings: sanitizedBody.privacySettings
+              ? { update: sanitizedBody.privacySettings }
               : undefined,
           },
           select: {
@@ -112,19 +133,23 @@ export const userSettingsRouter = new Elysia()
             chainId: true,
             language: true,
             theme: true,
+            githubProfileLink: true,
+            xProfileLink: true,
             notificationPreferences: true,
             privacySettings: true,
             twoFactorEnabled: true,
             defaultPaymentAddress: true,
             selectedPaymentAddress: true,
+            lastLoginAt: true,
           },
         });
 
-        logger.info(`User settings updated successfully for ${userAddress}`);
-        return userSettings;
+        logger.info(`User settings updated successfully for ${userAddress}`, {
+          changedFields: Object.keys(sanitizedBody),
+        });
+        return redactSensitiveInfo(userSettings);
       } catch (error) {
-        logger.error(`Error updating user settings for ${userAddress}:`, error);
-        throw new AuthError(500, "Failed to update user settings");
+        handlePrismaError(error, "update user settings");
       }
     },
     {
@@ -142,29 +167,37 @@ export const userSettingsRouter = new Elysia()
       const userAddress = authenticatedUser.walletAddress;
       logger.info(`User settings PATCH - User address: ${userAddress}`);
 
+      const sanitizedBody = sanitizeInput(body);
+
       try {
-        // Fetch current user settings
         const currentSettings = await prisma.user.findUnique({
           where: { walletAddress: userAddress },
           select: {
             notificationPreferences: true,
             privacySettings: true,
+            updatedAt: true,
           },
         });
 
-        // Merge new settings with current settings
+        if (!currentSettings) {
+          throw new AuthError(404, "User settings not found");
+        }
+
         const updatedSettings = {
-          ...body,
-          notificationPreferences: body.notificationPreferences
-            ? { update: body.notificationPreferences }
+          ...sanitizedBody,
+          notificationPreferences: sanitizedBody.notificationPreferences
+            ? { update: sanitizedBody.notificationPreferences }
             : undefined,
-          privacySettings: body.privacySettings
-            ? { update: body.privacySettings }
+          privacySettings: sanitizedBody.privacySettings
+            ? { update: sanitizedBody.privacySettings }
             : undefined,
         };
 
         const userSettings = await prisma.user.update({
-          where: { walletAddress: userAddress },
+          where: {
+            walletAddress: userAddress,
+            updatedAt: currentSettings.updatedAt,
+          },
           data: updatedSettings,
           select: {
             walletAddress: true,
@@ -176,26 +209,39 @@ export const userSettingsRouter = new Elysia()
             chainId: true,
             language: true,
             theme: true,
+            githubProfileLink: true,
+            xProfileLink: true,
             notificationPreferences: true,
             privacySettings: true,
             twoFactorEnabled: true,
             defaultPaymentAddress: true,
             selectedPaymentAddress: true,
+            lastLoginAt: true,
           },
         });
 
-        logger.info(`User settings patched successfully for ${userAddress}`);
-        return userSettings;
+        logger.info(`User settings patched successfully for ${userAddress}`, {
+          changedFields: Object.keys(sanitizedBody),
+        });
+        return redactSensitiveInfo(userSettings);
       } catch (error) {
-        logger.error(`Error patching user settings for ${userAddress}:`, error);
-        if (error instanceof AuthError) throw error;
-        throw new AuthError(500, "Failed to patch user settings");
+        if (
+          error instanceof PrismaClientKnownRequestError &&
+          error.code === "P2004"
+        ) {
+          throw new AuthError(
+            409,
+            "The user settings have been modified. Please try again."
+          );
+        }
+        handlePrismaError(error, "patch user settings");
       }
     },
     {
       body: t.Partial(userSettingsSchema),
     }
   )
+  .use(rateLimiter)
   .post(
     "/renew-api-key",
     async ({ body, set, jwt, cookie: { auth }, authenticatedUser }) => {
@@ -221,13 +267,14 @@ export const userSettingsRouter = new Elysia()
           return { error: "Invalid action" };
         }
 
-        // Your API key renewal logic here
         const newApiKey = crypto.randomBytes(32).toString("hex");
 
-        // Update the user's API key in the database
         const updatedUser = await prisma.user.update({
           where: { walletAddress: payload.sub as string },
-          data: { apiKey: newApiKey },
+          data: {
+            apiKey: newApiKey,
+            lastLoginAt: new Date(),
+          },
         });
 
         if (!updatedUser) {
@@ -235,9 +282,12 @@ export const userSettingsRouter = new Elysia()
           return { error: "User not found" };
         }
 
+        logger.info(
+          `API key renewed successfully for ${updatedUser.walletAddress}`
+        );
         return { apiKey: newApiKey };
       } catch (error) {
-        console.error("Error renewing API key:", error);
+        logger.error("Error renewing API key:", error);
         set.status = 500;
         return { error: "Failed to renew API key" };
       }
@@ -246,14 +296,10 @@ export const userSettingsRouter = new Elysia()
       body: renewApiKeySchema,
     }
   )
-  .onError(({ error, set, request }) => {
-    if (error instanceof ParseError) {
-      logger.warn("Failed to parse request body", {
-        body: request.body,
-        error: error.message,
-      });
-      set.status = 400;
-      return { error: "Invalid request body" };
+  .onError(({ error, set }) => {
+    if (error instanceof AuthError) {
+      set.status = error.statusCode;
+      return { error: error.message };
     }
 
     logger.error("Unexpected error in user settings router", {

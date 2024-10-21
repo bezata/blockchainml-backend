@@ -8,81 +8,71 @@ generator client {
 }
 
 model User {
-  id                    String         @id @default(auto()) @map("_id") @db.ObjectId
-  walletAddress         String         @unique
-  chainId               String
-  apiKey                String         @unique
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
-  username              String         @unique
-  name                  String?
-  email                 String?       
-  bio                   String?
-  avatar                String?
-  language              String?
-  theme                 String?
-  githubProfileLink     String?
-  xProfileLink          String?
-  defaultPaymentAddress String?
-  selectedPaymentAddress String?
-  twoFactorEnabled      Boolean        @default(false)
-  notificationPreferences NotificationPreferences?
-  privacySettings       PrivacySettings?
-  projects              Project[]
-  repositories          Repository[]
-  monetizationSettings  MonetizationSettings?
-  datasets              Dataset[]
-  posts                 Post[]
-  comments              Comment[]
-  sessions              Session[]
-  refreshTokens         RefreshToken[]
-  lastLoginAt           DateTime?
+  id                      String                @id @default(auto()) @map("_id") @db.ObjectId
+  walletAddress           String                @unique
+  chainId                 String
+  apiKey                  String                @unique
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+  username                String                @unique
+  name                    String?
+  email                   String?
+  bio                     String?
+  avatar                  String?
+  language                String?
+  theme                   String?
+  githubProfileLink       String?
+  xProfileLink            String?
+  defaultPaymentAddress   String?
+  selectedPaymentAddress  String?
+  twoFactorEnabled        Boolean               @default(false)
+  notificationPreferences Json?
+  privacySettings         Json?
+  projects                Project[]
+  repositories            Repository[]
+  monetizationSettings    MonetizationSettings?
+  datasets                Dataset[]
+  posts                   Post[]                @relation("AuthorPosts")
+  comments                Comment[]             @relation("AuthorComments")
+  sessions                Session[]
+  refreshTokens           RefreshToken[]
+  lastLoginAt             DateTime?
 
   @@index([email])
 }
 
-model NotificationPreferences {
-  id                String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId            String   @unique @db.ObjectId
-  user              User     @relation(fields: [userId], references: [id])
-  emailNotifications Boolean  @default(true)
-}
-
-model PrivacySettings {
-  id                String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId            String   @unique @db.ObjectId
-  user              User     @relation(fields: [userId], references: [id])
-  profileVisibility String   @default("public")
-  showEmail         Boolean  @default(false)
+enum ProfileVisibility {
+  PUBLIC
+  PRIVATE
 }
 
 model Project {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  id          String  @id @default(auto()) @map("_id") @db.ObjectId
   name        String
   description String?
   link        String?
-  userId      String   @db.ObjectId
-  user        User     @relation(fields: [userId], references: [id])
+  userId      String  @db.ObjectId
+  user        User    @relation(fields: [userId], references: [id])
 
   @@index([userId])
 }
 
 model Repository {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  name        String
-  link        String
-  userId      String   @db.ObjectId
-  user        User     @relation(fields: [userId], references: [id])
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  name   String
+  link   String
+  userId String @db.ObjectId
+  user   User   @relation(fields: [userId], references: [id])
 
   @@index([userId])
 }
 
 model MonetizationSettings {
-  id                String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId            String   @unique @db.ObjectId
-  user              User     @relation(fields: [userId], references: [id])
-  paymentMethod     String?
-  subscriptionTier  String?
+  id               String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId           String  @unique @db.ObjectId
+  user             User    @relation(fields: [userId], references: [id])
+  paymentMethod    String?
+  subscriptionTier String?
 }
 
 model Dataset {
@@ -111,7 +101,7 @@ model Post {
   category            String
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
-  author              User      @relation(fields: [authorWalletAddress], references: [walletAddress])
+  author              User      @relation("AuthorPosts", fields: [authorWalletAddress], references: [walletAddress])
   authorWalletAddress String
   comments            Comment[]
   likes               Int       @default(0)
@@ -127,7 +117,7 @@ model Comment {
   content             String
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
-  author              User     @relation(fields: [authorWalletAddress], references: [walletAddress])
+  author              User     @relation("AuthorComments", fields: [authorWalletAddress], references: [walletAddress])
   authorWalletAddress String
   post                Post     @relation(fields: [postId], references: [id])
   postId              String   @db.ObjectId
@@ -138,17 +128,17 @@ model Comment {
 }
 
 model Session {
-  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
-  userWalletAddress   String
-  user                User     @relation(fields: [userWalletAddress], references: [walletAddress])
-  token               String   @unique
-  createdAt           DateTime @default(now())
-  expiresAt           DateTime
-  lastActivity        DateTime @default(now())
-  ipAddress           String?
-  userAgent           String?
-  deviceInfo          Json?
-  isValid             Boolean  @default(true)
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  userWalletAddress String
+  user              User     @relation(fields: [userWalletAddress], references: [walletAddress])
+  token             String   @unique
+  createdAt         DateTime @default(now())
+  expiresAt         DateTime
+  lastActivity      DateTime @default(now())
+  ipAddress         String?
+  userAgent         String?
+  deviceInfo        Json?
+  isValid           Boolean  @default(true)
 
   @@index([userWalletAddress])
   @@index([expiresAt])
@@ -156,13 +146,13 @@ model Session {
 }
 
 model RefreshToken {
-  id            String   @id @default(auto()) @map("_id") @db.ObjectId
-  token         String   @unique
-  userId        String   @db.ObjectId
-  user          User     @relation(fields: [userId], references: [id])
-  createdAt     DateTime @default(now())
-  expiresAt     DateTime
-  isRevoked     Boolean  @default(false)
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  token     String   @unique
+  userId    String   @db.ObjectId
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
 
   @@index([userId])
   @@index([expiresAt])
