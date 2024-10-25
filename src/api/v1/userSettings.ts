@@ -1,30 +1,62 @@
-import { Elysia, t } from "elysia";
+import { Elysia, Static, t } from "elysia";
 import { authPlugin, AuthError } from "../../middleware/authPlugin";
 import prisma from "../../middleware/prismaclient";
+import { Prisma } from "@prisma/client";
 import { logger } from "../../utils/monitor";
 import crypto from "crypto";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
-import { rateLimiter } from "../../utils/rateLimit";
-import { isValidEmail, sanitizeInput } from "../../utils/security";
-import { redactSensitiveInfo } from "../../utils/security";
+import {
+  sanitizeInput,
+  enhancedRedactSensitiveInfo,
+  validation,
+  type SanitizationContext,
+} from "../../utils/security";
 
-const handlePrismaError = (error: unknown, operation: string) => {
-  if (error instanceof PrismaClientKnownRequestError) {
-    if (error.code === "P2002") {
-      throw new AuthError(409, "Unique constraint violation");
-    }
-    if (error.code === "P2025") {
-      throw new AuthError(404, "Record not found");
-    }
-  }
-  logger.error(`Error in ${operation}:`, error);
-  throw new AuthError(500, `Failed to ${operation}`);
+const createPerformanceTracker = (label: string) => {
+  const start = process.hrtime();
+  return {
+    end: () => {
+      const diff = process.hrtime(start);
+      return (diff[0] * 1e9 + diff[1]) / 1e6;
+    },
+  };
 };
 
+// Define type-safe interfaces for user settings
+interface NotificationPreferences {
+  emailNotifications: boolean;
+}
+
+interface PrivacySettings {
+  profileVisibility: "public" | "private";
+  showEmail?: boolean;
+}
+type UserSettingsSchema = {
+  username?: string;
+  name?: string;
+  email?: string;
+  bio?: string;
+  avatar?: string;
+  language?: string;
+  theme?: string;
+  githubProfileLink?: string;
+  xProfileLink?: string;
+  notificationPreferences?: {
+    emailNotifications: boolean;
+  };
+  privacySettings?: {
+    profileVisibility: "public" | "private";
+    showEmail?: boolean;
+  };
+  twoFactorEnabled?: boolean;
+  defaultPaymentAddress?: string;
+  selectedPaymentAddress?: string;
+};
+// Define the schema using Elysia's type system
 const userSettingsSchema = t.Object({
   username: t.Optional(t.String({ minLength: 3, maxLength: 30 })),
   name: t.Optional(t.String({ maxLength: 100 })),
-  email: t.Optional(t.String({ validate: isValidEmail })),
+  email: t.Optional(t.String({ validate: validation.isValidEmail })),
   bio: t.Optional(t.String({ maxLength: 500 })),
   avatar: t.Optional(t.String()),
   language: t.Optional(t.String()),
@@ -47,20 +79,214 @@ const userSettingsSchema = t.Object({
   selectedPaymentAddress: t.Optional(t.String()),
 });
 
+type UserSettingsInput = Static<typeof userSettingsSchema>;
+
 const renewApiKeySchema = t.Object({
   action: t.Literal("renew-api-key"),
 });
 
+type PartialUserSettings = {
+  [K in keyof UserSettingsInput]?: UserSettingsInput[K];
+};
+
+// Type-safe error handling
+const handlePrismaError = (error: unknown, operation: string) => {
+  const perf = createPerformanceTracker(`prisma-error-${operation}`);
+
+  if (error instanceof PrismaClientKnownRequestError) {
+    logger.error(`Prisma error in ${operation}`, {
+      code: error.code,
+      meta: error.meta,
+      message: error.message,
+      stack: error.stack,
+      operation,
+    });
+
+    const duration = perf.end();
+
+    if (error.code === "P2002") {
+      throw new AuthError(409, "Unique constraint violation");
+    }
+    if (error.code === "P2025") {
+      throw new AuthError(404, "Record not found");
+    }
+  }
+
+  const duration = perf.end();
+  logger.error(`Error in ${operation}:`, {
+    error:
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
+        : error,
+    duration,
+  });
+  throw new AuthError(500, `Failed to ${operation}`);
+};
+
+// Fix the validation function
+const validateUserSettings = (input: unknown): UserSettingsInput => {
+  if (!input || typeof input !== "object") {
+    throw new Error("Input must be an object");
+  }
+
+  const result: Partial<UserSettingsInput> = {};
+  const inputObj = input as Record<string, unknown>;
+
+  // Validation functions for specific types
+  const validateOptionalString = (
+    value: unknown,
+    field: string,
+    minLength?: number,
+    maxLength?: number
+  ): string | undefined => {
+    if (value === undefined) return undefined;
+    if (typeof value !== "string") {
+      throw new Error(`${field} must be a string`);
+    }
+    if (minLength && value.length < minLength) {
+      throw new Error(`${field} must be at least ${minLength} characters`);
+    }
+    if (maxLength && value.length > maxLength) {
+      throw new Error(`${field} must not exceed ${maxLength} characters`);
+    }
+    return value;
+  };
+
+  // Handle individual fields
+  if ("username" in inputObj) {
+    result.username = validateOptionalString(
+      inputObj.username,
+      "username",
+      3,
+      30
+    );
+  }
+
+  if ("name" in inputObj) {
+    result.name = validateOptionalString(inputObj.name, "name", undefined, 100);
+  }
+
+  if ("email" in inputObj) {
+    const email = validateOptionalString(inputObj.email, "email");
+    if (email !== undefined && !validation.isValidEmail(email)) {
+      throw new Error("Invalid email format");
+    }
+    result.email = email;
+  }
+
+  if ("bio" in inputObj) {
+    result.bio = validateOptionalString(inputObj.bio, "bio", undefined, 500);
+  }
+
+  // Handle simple string fields
+  const simpleStringFields: (keyof UserSettingsSchema)[] = [
+    "avatar",
+    "language",
+    "theme",
+    "githubProfileLink",
+    "xProfileLink",
+    "defaultPaymentAddress",
+    "selectedPaymentAddress",
+  ];
+
+  simpleStringFields.forEach((field) => {
+    if (field in inputObj) {
+      (result as any)[field] = validateOptionalString(inputObj[field], field);
+    }
+  });
+
+  // Handle notification preferences
+  if ("notificationPreferences" in inputObj) {
+    const prefs = inputObj.notificationPreferences;
+    if (prefs !== undefined) {
+      if (typeof prefs !== "object" || prefs === null) {
+        throw new Error("Notification preferences must be an object");
+      }
+      const { emailNotifications } = prefs as Record<string, unknown>;
+      if (typeof emailNotifications !== "boolean") {
+        throw new Error("emailNotifications must be a boolean");
+      }
+      result.notificationPreferences = { emailNotifications };
+    }
+  }
+
+  // Handle privacy settings
+  if ("privacySettings" in inputObj) {
+    const settings = inputObj.privacySettings;
+    if (settings !== undefined) {
+      if (typeof settings !== "object" || settings === null) {
+        throw new Error("Privacy settings must be an object");
+      }
+      const { profileVisibility, showEmail } = settings as Record<
+        string,
+        unknown
+      >;
+
+      if (
+        typeof profileVisibility !== "string" ||
+        !["public", "private"].includes(profileVisibility)
+      ) {
+        throw new Error(
+          'profileVisibility must be either "public" or "private"'
+        );
+      }
+
+      result.privacySettings = {
+        profileVisibility: profileVisibility as "public" | "private",
+      };
+
+      if (showEmail !== undefined) {
+        if (typeof showEmail !== "boolean") {
+          throw new Error("showEmail must be a boolean");
+        }
+        result.privacySettings.showEmail = showEmail;
+      }
+    }
+  }
+
+  // Handle twoFactorEnabled
+  if ("twoFactorEnabled" in inputObj) {
+    const twoFactor = inputObj.twoFactorEnabled;
+    if (twoFactor !== undefined) {
+      if (typeof twoFactor !== "boolean") {
+        throw new Error("twoFactorEnabled must be a boolean");
+      }
+      result.twoFactorEnabled = twoFactor;
+    }
+  }
+
+  return result as UserSettingsInput;
+};
+
+// Type-safe sanitization
+export const sanitizeUserSettings = (input: unknown): UserSettingsInput => {
+  const sanitized = sanitizeInput(input, "general" as SanitizationContext);
+  return validateUserSettings(sanitized);
+};
+
 export const userSettingsRouter = new Elysia()
   .use(authPlugin)
-  .get("/", async ({ authenticatedUser }) => {
+  .get("/", async ({ authenticatedUser, store }) => {
+    const perf = createPerformanceTracker("get-user-settings");
+    const requestLogger = (store as any)?.requestLogger || logger;
+
     if (!authenticatedUser) {
-      logger.error("User settings GET - No authenticated user");
+      requestLogger.error("User settings GET - No authenticated user");
       throw new AuthError(401, "Authentication required");
     }
 
     const userAddress = authenticatedUser.walletAddress;
-    logger.info(`User settings GET - User address: ${userAddress}`);
+    requestLogger.info("Fetching user settings", {
+      userAddress: enhancedRedactSensitiveInfo(
+        { address: userAddress },
+        { preserveWalletAddress: true }
+      ).address,
+      operation: "GET",
+    });
 
     try {
       const userSettings = await prisma.user.findUnique({
@@ -88,39 +314,68 @@ export const userSettingsRouter = new Elysia()
       });
 
       if (!userSettings) {
-        logger.warn(`User settings not found for ${userAddress}`);
+        const duration = perf.end();
+        requestLogger.warn("User settings not found", {
+          userAddress: enhancedRedactSensitiveInfo(
+            { address: userAddress },
+            { preserveWalletAddress: true }
+          ).address,
+          duration,
+        });
         throw new AuthError(404, "User settings not found");
       }
 
-      logger.info(`User settings fetched successfully for ${userAddress}`);
-      return redactSensitiveInfo(userSettings);
+      const duration = perf.end();
+      requestLogger.info("User settings retrieved successfully", {
+        userAddress: enhancedRedactSensitiveInfo(
+          { address: userAddress },
+          { preserveWalletAddress: true }
+        ).address,
+        duration,
+        fields: Object.keys(userSettings),
+      });
+
+      return enhancedRedactSensitiveInfo(userSettings, {
+        preserveWalletAddress: true,
+      });
     } catch (error) {
+      perf.end();
       handlePrismaError(error, "fetch user settings");
     }
   })
   .put(
     "/",
-    async ({ authenticatedUser, body }) => {
+    async ({ authenticatedUser, body, store }) => {
+      const perf = createPerformanceTracker("update-user-settings");
+      const requestLogger = (store as any)?.requestLogger || logger;
+
       if (!authenticatedUser) {
-        logger.error("User settings PUT - No authenticated user");
+        requestLogger.error("User settings PUT - No authenticated user");
         throw new AuthError(401, "Authentication required");
       }
 
       const userAddress = authenticatedUser.walletAddress;
-      logger.info(`User settings PUT - User address: ${userAddress}`);
-
-      const sanitizedBody = sanitizeInput(body);
+      requestLogger.info("Updating user settings", {
+        userAddress: enhancedRedactSensitiveInfo(
+          { address: userAddress },
+          { preserveWalletAddress: true }
+        ).address,
+        operation: "PUT",
+        updatedFields: Object.keys(body || {}),
+      });
 
       try {
+        const sanitizedBody = sanitizeUserSettings(body);
+
         const userSettings = await prisma.user.update({
           where: { walletAddress: userAddress },
           data: {
             ...sanitizedBody,
             notificationPreferences: sanitizedBody.notificationPreferences
-              ? { update: sanitizedBody.notificationPreferences }
+              ? { set: JSON.stringify(sanitizedBody.notificationPreferences) }
               : undefined,
             privacySettings: sanitizedBody.privacySettings
-              ? { update: sanitizedBody.privacySettings }
+              ? { set: JSON.stringify(sanitizedBody.privacySettings) }
               : undefined,
           },
           select: {
@@ -144,32 +399,49 @@ export const userSettingsRouter = new Elysia()
           },
         });
 
-        logger.info(`User settings updated successfully for ${userAddress}`, {
+        const duration = perf.end();
+        requestLogger.info("User settings updated successfully", {
+          userAddress: enhancedRedactSensitiveInfo(
+            { address: userAddress },
+            { preserveWalletAddress: true }
+          ).address,
+          duration,
           changedFields: Object.keys(sanitizedBody),
         });
-        return redactSensitiveInfo(userSettings);
+
+        return enhancedRedactSensitiveInfo(userSettings, {
+          preserveWalletAddress: true,
+        });
       } catch (error) {
+        perf.end();
         handlePrismaError(error, "update user settings");
       }
     },
-    {
-      body: userSettingsSchema,
-    }
+    { body: userSettingsSchema }
   )
   .patch(
     "/",
-    async ({ authenticatedUser, body }) => {
+    async ({ authenticatedUser, body, store }) => {
+      const perf = createPerformanceTracker("patch-user-settings");
+      const requestLogger = (store as any)?.requestLogger || logger;
+
       if (!authenticatedUser) {
-        logger.error("User settings PATCH - No authenticated user");
+        requestLogger.error("User settings PATCH - No authenticated user");
         throw new AuthError(401, "Authentication required");
       }
 
       const userAddress = authenticatedUser.walletAddress;
-      logger.info(`User settings PATCH - User address: ${userAddress}`);
-
-      const sanitizedBody = sanitizeInput(body);
+      requestLogger.info("Patching user settings", {
+        userAddress: enhancedRedactSensitiveInfo(
+          { address: userAddress },
+          { preserveWalletAddress: true }
+        ).address,
+        operation: "PATCH",
+        updatedFields: Object.keys(body || {}),
+      });
 
       try {
+        // Verify user exists
         const currentSettings = await prisma.user.findUnique({
           where: { walletAddress: userAddress },
           select: {
@@ -180,25 +452,34 @@ export const userSettingsRouter = new Elysia()
         });
 
         if (!currentSettings) {
+          const duration = perf.end();
+          requestLogger.warn("User settings not found for PATCH", {
+            userAddress: enhancedRedactSensitiveInfo(
+              { address: userAddress },
+              { preserveWalletAddress: true }
+            ).address,
+            duration,
+          });
           throw new AuthError(404, "User settings not found");
         }
 
-        const updatedSettings = {
-          ...sanitizedBody,
-          notificationPreferences: sanitizedBody.notificationPreferences
-            ? { update: sanitizedBody.notificationPreferences }
-            : undefined,
-          privacySettings: sanitizedBody.privacySettings
-            ? { update: sanitizedBody.privacySettings }
-            : undefined,
-        };
+        // Sanitize and parse the body
+        const sanitizedBody = sanitizeUserSettings(body);
 
+        // Update user settings
         const userSettings = await prisma.user.update({
           where: {
             walletAddress: userAddress,
-            updatedAt: currentSettings.updatedAt,
           },
-          data: updatedSettings,
+          data: {
+            ...sanitizedBody,
+            notificationPreferences: sanitizedBody.notificationPreferences
+              ? { set: JSON.stringify(sanitizedBody.notificationPreferences) }
+              : undefined,
+            privacySettings: sanitizedBody.privacySettings
+              ? { set: JSON.stringify(sanitizedBody.privacySettings) }
+              : undefined,
+          },
           select: {
             walletAddress: true,
             username: true,
@@ -220,36 +501,58 @@ export const userSettingsRouter = new Elysia()
           },
         });
 
-        logger.info(`User settings patched successfully for ${userAddress}`, {
+        const duration = perf.end();
+        requestLogger.info("User settings patched successfully", {
+          userAddress: enhancedRedactSensitiveInfo(
+            { address: userAddress },
+            { preserveWalletAddress: true }
+          ).address,
+          duration,
           changedFields: Object.keys(sanitizedBody),
         });
-        return redactSensitiveInfo(userSettings);
+
+        return enhancedRedactSensitiveInfo(userSettings, {
+          preserveWalletAddress: true,
+        });
       } catch (error) {
-        if (
-          error instanceof PrismaClientKnownRequestError &&
-          error.code === "P2004"
-        ) {
-          throw new AuthError(
-            409,
-            "The user settings have been modified. Please try again."
-          );
+        const duration = perf.end();
+        requestLogger.error("Error in patch user settings", {
+          error:
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                  stack: error.stack,
+                }
+              : error,
+          duration,
+        });
+
+        if (error instanceof AuthError) {
+          throw error;
         }
-        handlePrismaError(error, "patch user settings");
+
+        throw new AuthError(500, "Failed to patch user settings");
       }
     },
-    {
-      body: t.Partial(userSettingsSchema),
-    }
+    { body: t.Partial(userSettingsSchema) }
   )
-  .use(rateLimiter)
   .post(
     "/renew-api-key",
-    async ({ body, set, jwt, cookie: { auth }, authenticatedUser }) => {
-      logger.info("API key renewal for ", {
-        walletAddress: authenticatedUser.walletAddress,
+    async ({ body, set, jwt, cookie: { auth }, authenticatedUser, store }) => {
+      const perf = createPerformanceTracker("renew-api-key");
+      const requestLogger = (store as any)?.requestLogger || logger;
+
+      requestLogger.info("API key renewal request", {
+        userAddress: enhancedRedactSensitiveInfo(
+          { address: authenticatedUser.walletAddress },
+          { preserveWalletAddress: true }
+        ).address,
       });
 
       if (!auth) {
+        const duration = perf.end();
+        requestLogger.warn("API key renewal - No auth token", { duration });
         set.status = 401;
         return { error: "Authentication required" };
       }
@@ -257,14 +560,10 @@ export const userSettingsRouter = new Elysia()
       try {
         const payload = await jwt.verify(auth.value);
         if (!payload) {
+          const duration = perf.end();
+          requestLogger.warn("API key renewal - Invalid token", { duration });
           set.status = 401;
           return { error: "Invalid token" };
-        }
-
-        const { action } = body;
-        if (action !== "renew-api-key") {
-          set.status = 400;
-          return { error: "Invalid action" };
         }
 
         const newApiKey = crypto.randomBytes(32).toString("hex");
@@ -277,34 +576,58 @@ export const userSettingsRouter = new Elysia()
           },
         });
 
-        if (!updatedUser) {
-          set.status = 404;
-          return { error: "User not found" };
-        }
+        const duration = perf.end();
+        requestLogger.info("API key renewed successfully", {
+          userAddress: enhancedRedactSensitiveInfo(
+            { address: updatedUser.walletAddress },
+            { preserveWalletAddress: true }
+          ).address,
+          duration,
+        });
 
-        logger.info(
-          `API key renewed successfully for ${updatedUser.walletAddress}`
-        );
-        return { apiKey: newApiKey };
+        return {
+          apiKey: enhancedRedactSensitiveInfo({ apiKey: newApiKey }).apiKey,
+        };
       } catch (error) {
-        logger.error("Error renewing API key:", error);
+        const duration = perf.end();
+        requestLogger.error("Error renewing API key", {
+          error:
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                  stack: error.stack,
+                }
+              : error,
+          duration,
+        });
         set.status = 500;
         return { error: "Failed to renew API key" };
       }
     },
-    {
-      body: renewApiKeySchema,
-    }
+    { body: renewApiKeySchema }
   )
-  .onError(({ error, set }) => {
+  .onError(({ error, set, store }) => {
+    const errorLogger = (store as any)?.requestLogger || logger;
+
     if (error instanceof AuthError) {
+      errorLogger.warn("Auth error in user settings", {
+        statusCode: error.statusCode,
+        message: error.message,
+      });
       set.status = error.statusCode;
       return { error: error.message };
     }
 
-    logger.error("Unexpected error in user settings router", {
-      error: error.message,
-      stack: error.stack,
+    errorLogger.error("Unexpected error in user settings router", {
+      error:
+        error instanceof Error
+          ? {
+              name: error.name,
+              message: error.message,
+              stack: error.stack,
+            }
+          : error,
     });
     set.status = 500;
     return { error: "Internal Server Error" };

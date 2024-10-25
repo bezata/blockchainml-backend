@@ -1,7 +1,7 @@
 import jwt from "@elysiajs/jwt";
-import Elysia from "elysia";
+import Elysia, { t } from "elysia";
 import { PrismaClient } from "@prisma/client";
-import { logger } from "../utils/monitor";
+import { logger, maskSensitiveData, loggerPlugin } from "../utils/monitor";
 
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -17,8 +17,14 @@ export class AuthError extends Error {
   }
 }
 
+type LoggerContext = {
+  requestLogger: typeof logger;
+  logResponse: () => void;
+};
+
 export const authPlugin = (app: Elysia) =>
   app
+    .use(loggerPlugin)
     .use(
       jwt({
         name: "jwt",
@@ -26,49 +32,86 @@ export const authPlugin = (app: Elysia) =>
         exp: "7d",
       })
     )
-    .derive(async ({ jwt, cookie: { auth }, set }) => {
-      logger.info("AuthPlugin started");
-      logger.info("Auth cookie:", auth);
-      console.log(auth.cookie);
-      const token = auth.value;
-      logger.info("Access token from cookie:", token);
+    .derive(async ({ jwt, cookie: { auth }, set, store }) => {
+      const authLogger = (store as LoggerContext)?.requestLogger || logger;
+      const perf = {
+        start: process.hrtime(),
+        end: () => {
+          const diff = process.hrtime(perf.start);
+          return (diff[0] * 1e9 + diff[1]) / 1e6;
+        },
+      };
+
+      authLogger.info("Starting authentication process", {
+        component: "authPlugin",
+        hasCookie: !!auth,
+      });
+
+      const token = auth?.value;
+
+      // Mask the token before logging
+      authLogger.debug("Processing authentication token", {
+        hasToken: !!token,
+        tokenMasked: token ? `${token.substring(0, 10)}...` : null,
+      });
 
       if (!token) {
-        logger.warn("No access token found in cookie");
+        const duration = perf.end();
+        authLogger.warn("Authentication failed: No token provided", {
+          duration,
+          statusCode: 401,
+        });
         set.status = 401;
         throw new AuthError(401, "Authentication required");
       }
 
       try {
-        logger.info("Verifying JWT token");
+        authLogger.debug("Verifying JWT token");
         const jwtPayload = await jwt.verify(token);
-        logger.info("JWT verification result:", jwtPayload);
 
         if (!jwtPayload) {
-          logger.warn("Invalid JWT token");
+          const duration = perf.end();
+          authLogger.warn("Authentication failed: Invalid JWT token", {
+            duration,
+            statusCode: 401,
+          });
           set.status = 401;
           throw new AuthError(401, "Invalid token");
         }
 
         const walletAddress = jwtPayload.sub as string;
-        logger.info("Fetching user from database");
+
+        authLogger.debug("Fetching user from database", {
+          walletAddress: maskSensitiveData({ walletAddress }).walletAddress,
+        });
+
         const user = await prisma.user.findUnique({
           where: { walletAddress },
         });
-        logger.info("User found in database:", user);
 
         if (!user) {
-          logger.warn("User not found in database");
+          const duration = perf.end();
+          authLogger.warn("Authentication failed: User not found", {
+            duration,
+            statusCode: 401,
+            walletAddress: maskSensitiveData({ walletAddress }).walletAddress,
+          });
           set.status = 401;
           throw new AuthError(401, "User not found");
         }
 
-        logger.info("User successfully authenticated:", user.walletAddress);
+        const duration = perf.end();
+        authLogger.info("Authentication successful", {
+          duration,
+          walletAddress: maskSensitiveData({ walletAddress }).walletAddress,
+          username: user.username,
+        });
+
         return {
           authenticatedUser: {
             walletAddress: user.walletAddress,
             chainId: user.chainId,
-            apiKey: user.apiKey,
+            apiKey: maskSensitiveData({ apiKey: user.apiKey }).apiKey,
             username: user.username,
             avatar: user.avatar,
             bio: user.bio,
@@ -86,7 +129,20 @@ export const authPlugin = (app: Elysia) =>
           },
         };
       } catch (error) {
-        logger.error("Error in authPlugin:", error);
+        const duration = perf.end();
+        authLogger.error("Authentication error", {
+          duration,
+          error:
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                  stack: error.stack,
+                }
+              : error,
+          statusCode: 401,
+        });
+
         set.status = 401;
         throw new AuthError(401, "Authentication failed");
       }

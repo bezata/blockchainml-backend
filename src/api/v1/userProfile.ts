@@ -1,58 +1,65 @@
-import { Elysia, t } from "elysia";
-import { PrismaClient, User, Prisma } from "@prisma/client";
-import { authPlugin, AuthError } from "../../middleware/authPlugin";
+import { Elysia } from "elysia";
+import prisma from "../../middleware/prismaclient";
 import { logger } from "../../utils/monitor";
-import { TRPCError } from "@trpc/server";
+import { authPlugin, AuthError } from "../../middleware/authPlugin";
+import { Prisma } from "@prisma/client";
+import { enhancedRedactSensitiveInfo } from "../../utils/security";
 
-const prisma = new PrismaClient().$extends({
-  query: {
-    user: {
-      async findUnique({ args, query }) {
-        logger.info("Custom findUnique for user profile:", args);
-        return query(args);
-      },
+// Type-safe interfaces based on Prisma schema
+interface UserProfile {
+  walletAddress: string;
+  name: string | null;
+  email: string | null;
+  bio: string | null;
+  avatar: string | null;
+  chainId: string;
+  language: string | null;
+  theme: string | null;
+  githubProfileLink: string | null;
+  xProfileLink: string | null;
+  notificationPreferences: Prisma.JsonValue | null;
+  privacySettings: Prisma.JsonValue | null;
+  twoFactorEnabled: boolean;
+  defaultPaymentAddress: string | null;
+  selectedPaymentAddress: string | null;
+}
+
+// Performance tracking utility
+const createPerformanceTracker = (label: string) => {
+  const start = process.hrtime();
+  return {
+    end: () => {
+      const diff = process.hrtime(start);
+      return (diff[0] * 1e9 + diff[1]) / 1e6;
     },
-  },
-});
-
-type UserProfile = Omit<User, "apiKey" | "createdAt" | "updatedAt">;
-type PublicProfile = Pick<User, "walletAddress" | "name" | "avatar" | "bio">;
-
-const userProfileSchema = t.Object({
-  name: t.Optional(t.String()),
-  email: t.Optional(t.String({ format: "email" })),
-  bio: t.Optional(t.String()),
-  avatar: t.Optional(t.String()),
-  language: t.Optional(t.String()),
-  theme: t.Optional(t.String()),
-  notifications: t.Optional(
-    t.Object({
-      email: t.Boolean(),
-      push: t.Boolean(),
-      sms: t.Boolean(),
-    })
-  ),
-  privacy: t.Optional(
-    t.Object({
-      profileVisibility: t.Enum({ public: "public", private: "private" }),
-      showEmail: t.Boolean(),
-    })
-  ),
-  twoFactor: t.Optional(t.Boolean()),
-  defaultPaymentAddress: t.Optional(t.String()),
-  paymentAddress: t.Optional(t.String()),
-});
+  };
+};
 
 export const userProfileRouter = new Elysia({ prefix: "/user" })
   .use(authPlugin)
-  .get("/profile", async ({ authenticatedUser }) => {
-    logger.info("userProfileRouter - GET /profile - User:", authenticatedUser);
+  .get("/profile", async ({ authenticatedUser, store }) => {
+    const perf = createPerformanceTracker("get-own-profile");
+    const requestLogger = (store as any)?.requestLogger || logger;
+
     if (!authenticatedUser) {
-      throw new AuthError(401, "User not authenticated");
+      const duration = perf.end();
+      requestLogger.error("User profile GET - No authenticated user", {
+        duration,
+      });
+      throw new AuthError(401, "Authentication required");
     }
+
     try {
+      const walletAddress = authenticatedUser.walletAddress;
+      requestLogger.info("Fetching own profile", {
+        userAddress: enhancedRedactSensitiveInfo(
+          { address: walletAddress },
+          { preserveWalletAddress: true }
+        ).address,
+      });
+
       const userProfile = await prisma.user.findUnique({
-        where: { walletAddress: authenticatedUser.walletAddress },
+        where: { walletAddress },
         select: {
           walletAddress: true,
           name: true,
@@ -62,89 +69,80 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
           chainId: true,
           language: true,
           theme: true,
-          notifications: true,
-          privacy: true,
-          twoFactor: true,
+          githubProfileLink: true,
+          xProfileLink: true,
+          notificationPreferences: true,
+          privacySettings: true,
+          twoFactorEnabled: true,
           defaultPaymentAddress: true,
-          paymentAddress: true,
+          selectedPaymentAddress: true,
         },
       });
 
       if (!userProfile) {
+        const duration = perf.end();
+        requestLogger.warn("User profile not found", {
+          userAddress: enhancedRedactSensitiveInfo(
+            { address: walletAddress },
+            { preserveWalletAddress: true }
+          ).address,
+          duration,
+        });
         throw new AuthError(404, "User profile not found");
       }
 
-      return userProfile as UserProfile;
-    } catch (error) {
-      logger.error("Error fetching user profile:", error);
-      if (error instanceof AuthError) {
-        throw error;
-      }
-      throw new AuthError(500, "Failed to fetch user profile");
-    }
-  })
-  .get("/profile/:walletAddress", async ({ params, authenticatedUser }) => {
-    try {
-      const profileUser = await prisma.user.findUnique({
-        where: { walletAddress: params.walletAddress },
-        select: {
-          walletAddress: true,
-          name: true,
-          email: true,
-          bio: true,
-          avatar: true,
-          chainId: true,
-          privacy: true,
-        },
+      const duration = perf.end();
+      requestLogger.info("Profile retrieved successfully", {
+        userAddress: enhancedRedactSensitiveInfo(
+          { address: walletAddress },
+          { preserveWalletAddress: true }
+        ).address,
+        duration,
+        fields: Object.keys(userProfile),
       });
 
-      if (!profileUser) {
-        throw new AuthError(404, "User not found");
-      }
-
-      const isOwnProfile =
-        authenticatedUser?.walletAddress === profileUser.walletAddress;
-      const privacy = profileUser.privacy as {
-        profileVisibility?: "public" | "private";
-      };
-      const isPublic = privacy?.profileVisibility === "public";
-
-      const publicProfile: PublicProfile = {
-        walletAddress: profileUser.walletAddress,
-        name: profileUser.name,
-        avatar: profileUser.avatar,
-        bio: profileUser.bio,
-      };
-
-      if (isOwnProfile || isPublic) {
-        const privacySettings = profileUser.privacy as {
-          showEmail?: boolean;
-        } | null;
-        return {
-          ...publicProfile,
-          chainId: profileUser.chainId,
-          email: privacySettings?.showEmail ? profileUser.email : undefined,
-        };
-      }
-
-      return publicProfile;
+      return enhancedRedactSensitiveInfo(userProfile, {
+        preserveWalletAddress: true,
+      });
     } catch (error) {
-      logger.error("Error fetching user profile:", error);
+      const duration = perf.end();
+      requestLogger.error("Error fetching user profile", {
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+              }
+            : error,
+        duration,
+      });
       if (error instanceof AuthError) throw error;
       throw new AuthError(500, "Failed to fetch user profile");
     }
   })
-  .patch(
-    "/profile",
-    async ({ authenticatedUser, body }) => {
-      if (!authenticatedUser) {
-        throw new AuthError(401, "User not authenticated");
-      }
+  .get(
+    "/profile/:walletAddress",
+    async ({ params, authenticatedUser, store }) => {
+      const perf = createPerformanceTracker("get-public-profile");
+      const requestLogger = (store as any)?.requestLogger || logger;
+
       try {
-        const validatedBody = userProfileSchema.parse(body);
-        const updatedUser = await prisma.user.update({
-          where: { walletAddress: authenticatedUser.walletAddress },
-          data: validatedBody,
+        requestLogger.info("Fetching public profile", {
+          targetAddress: enhancedRedactSensitiveInfo(
+            { address: params.walletAddress },
+            { preserveWalletAddress: true }
+          ).address,
+          requestedBy: authenticatedUser
+            ? enhancedRedactSensitiveInfo(
+                { address: authenticatedUser.walletAddress },
+                { preserveWalletAddress: true }
+              ).address
+            : "anonymous",
+        });
+
+        const profileUser = await prisma.user.findUnique({
+          where: { walletAddress: params.walletAddress },
           select: {
             walletAddress: true,
             name: true,
@@ -152,42 +150,121 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
             bio: true,
             avatar: true,
             chainId: true,
-            language: true,
-            theme: true,
-            notifications: true,
-            privacy: true,
-            twoFactor: true,
-            defaultPaymentAddress: true,
-            paymentAddress: true,
+            githubProfileLink: true,
+            xProfileLink: true,
+            privacySettings: true,
           },
         });
-        logger.info(
-          `User profile updated successfully for ${authenticatedUser.walletAddress}`
-        );
-        return updatedUser as UserProfile;
+
+        if (!profileUser) {
+          const duration = perf.end();
+          requestLogger.warn("Profile not found", {
+            targetAddress: enhancedRedactSensitiveInfo(
+              { address: params.walletAddress },
+              { preserveWalletAddress: true }
+            ).address,
+            duration,
+          });
+          throw new AuthError(404, "User not found");
+        }
+
+        const isOwnProfile =
+          authenticatedUser?.walletAddress === profileUser.walletAddress;
+        const privacy = profileUser.privacySettings as {
+          profileVisibility?: "public" | "private";
+          showEmail?: boolean;
+          showSocialLinks?: boolean;
+        } | null;
+        const isPublic = privacy?.profileVisibility === "public";
+
+        const publicProfile = {
+          walletAddress: profileUser.walletAddress,
+          name: profileUser.name,
+          avatar: profileUser.avatar,
+          bio: profileUser.bio,
+        };
+
+        if (isOwnProfile || isPublic) {
+          const duration = perf.end();
+          requestLogger.info("Full profile access granted", {
+            targetAddress: enhancedRedactSensitiveInfo(
+              { address: params.walletAddress },
+              { preserveWalletAddress: true }
+            ).address,
+            isOwnProfile,
+            isPublic,
+            duration,
+          });
+
+          return {
+            ...publicProfile,
+            chainId: profileUser.chainId,
+            email: privacy?.showEmail ? profileUser.email : undefined,
+            githubProfileLink: privacy?.showSocialLinks
+              ? profileUser.githubProfileLink
+              : undefined,
+            xProfileLink: privacy?.showSocialLinks
+              ? profileUser.xProfileLink
+              : undefined,
+          };
+        }
+
+        const duration = perf.end();
+        requestLogger.info("Limited profile access granted", {
+          targetAddress: enhancedRedactSensitiveInfo(
+            { address: params.walletAddress },
+            { preserveWalletAddress: true }
+          ).address,
+          duration,
+        });
+
+        return enhancedRedactSensitiveInfo(publicProfile, {
+          preserveWalletAddress: true,
+        });
       } catch (error) {
-        logger.error("Error updating user profile:", error);
-        if (error instanceof Prisma.PrismaClientKnownRequestError) {
-          if (error.code === "P2002") {
-            throw new AuthError(400, "This email is already in use");
-          }
-        }
-        if (error instanceof TRPCError) {
-          throw new AuthError(400, error.message);
-        }
-        throw new AuthError(500, "Failed to update user profile");
+        const duration = perf.end();
+        requestLogger.error("Error fetching public profile", {
+          error:
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                  stack: error.stack,
+                }
+              : error,
+          targetAddress: enhancedRedactSensitiveInfo(
+            { address: params.walletAddress },
+            { preserveWalletAddress: true }
+          ).address,
+          duration,
+        });
+        if (error instanceof AuthError) throw error;
+        throw new AuthError(500, "Failed to fetch user profile");
       }
-    },
-    {
-      body: userProfileSchema,
     }
   )
-  .onError(({ error, set }) => {
-    logger.error("Error in userProfileRouter:", error);
+  .onError(({ error, set, store }) => {
+    const errorLogger = (store as any)?.requestLogger || logger;
+
     if (error instanceof AuthError) {
+      errorLogger.warn("Auth error in profile router", {
+        statusCode: error.statusCode,
+        message: error.message,
+      });
       set.status = error.statusCode;
       return { error: error.message };
     }
+
+    errorLogger.error("Unexpected error in profile router", {
+      error:
+        error instanceof Error
+          ? {
+              name: error.name,
+              message: error.message,
+              stack: error.stack,
+            }
+          : error,
+    });
     set.status = 500;
     return { error: "Internal Server Error" };
   });
