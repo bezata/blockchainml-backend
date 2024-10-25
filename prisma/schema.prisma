@@ -68,11 +68,16 @@ model Repository {
 }
 
 model MonetizationSettings {
-  id               String  @id @default(auto()) @map("_id") @db.ObjectId
-  userId           String  @unique @db.ObjectId
-  user             User    @relation(fields: [userId], references: [id])
+  id               String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId           String    @unique @db.ObjectId
+  user             User      @relation(fields: [userId], references: [id])
   paymentMethod    String?
+  paymentChainId   String?
   subscriptionTier String?
+  subscriptionStatus String  @default("inactive")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  lastPaymentDate  DateTime?
 }
 
 model Dataset {

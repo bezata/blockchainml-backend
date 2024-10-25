@@ -42,6 +42,7 @@ type UserSettingsSchema = {
   twoFactorEnabled?: boolean;
   defaultPaymentAddress?: string;
   selectedPaymentAddress?: string;
+  paymentChainId?: string;
 };
 // Define the schema using Elysia's type system
 const userSettingsSchema = t.Object({
@@ -72,6 +73,20 @@ const userSettingsSchema = t.Object({
   twoFactorEnabled: t.Optional(t.Boolean()),
   defaultPaymentAddress: t.Optional(t.String()),
   selectedPaymentAddress: t.Optional(t.String()),
+  monetizationSettings: t.Optional(
+    t.Object({
+      paymentMethod: t.Optional(t.String()),
+      paymentChainId: t.Optional(t.String()),
+      subscriptionTier: t.Optional(t.String()),
+      subscriptionStatus: t.Optional(
+        t.Union([
+          t.Literal("active"),
+          t.Literal("inactive"),
+          t.Literal("suspended"),
+        ])
+      ),
+    })
+  ),
 });
 
 type UserSettingsInput = Static<typeof userSettingsSchema>;
@@ -80,10 +95,11 @@ const renewApiKeySchema = t.Object({
   action: t.Literal("renew-api-key"),
 });
 
-type PartialUserSettings = {
-  [K in keyof UserSettingsInput]?: UserSettingsInput[K];
+const validateMonetizationSettings = {
+  paymentMethod: ["crypto", "stripe", "paypal"],
+  subscriptionTier: ["free", "basic", "pro", "enterprise"],
+  paymentChainId: ["eth", "polygon", "bsc", "sol"],
 };
-
 // Type-safe error handling
 const handlePrismaError = (error: unknown, operation: string) => {
   const perf = createPerformanceTracker(`prisma-error-${operation}`);
@@ -209,7 +225,6 @@ const validateUserSettings = (input: unknown): UserSettingsInput => {
     }
   }
 
-  // Handle privacy settings
   if ("privacySettings" in inputObj) {
     const settings = inputObj.privacySettings;
     if (settings !== undefined) {
@@ -255,6 +270,15 @@ const validateUserSettings = (input: unknown): UserSettingsInput => {
       }
       result.twoFactorEnabled = twoFactor;
     }
+  }
+
+  if ("paymentChainId" in inputObj) {
+    const chainId = inputObj.paymentChainId;
+    if (chainId !== undefined && typeof chainId !== "string") {
+      throw new Error("paymentChainId must be a string");
+    }
+    result.monetizationSettings = result.monetizationSettings || {};
+    result.monetizationSettings.paymentChainId = chainId;
   }
 
   return result as UserSettingsInput;
@@ -308,6 +332,11 @@ export const userSettingsRouter = new Elysia()
           selectedPaymentAddress: true,
           apiKey: true,
           lastLoginAt: true,
+          monetizationSettings: {
+            select: {
+              paymentChainId: true,
+            },
+          },
         },
       });
 
@@ -375,6 +404,14 @@ export const userSettingsRouter = new Elysia()
             privacySettings: sanitizedBody.privacySettings
               ? { set: JSON.stringify(sanitizedBody.privacySettings) }
               : undefined,
+            monetizationSettings: sanitizedBody.monetizationSettings
+              ? {
+                  upsert: {
+                    create: sanitizedBody.monetizationSettings,
+                    update: sanitizedBody.monetizationSettings,
+                  },
+                }
+              : undefined,
           },
           select: {
             walletAddress: true,
@@ -394,6 +431,15 @@ export const userSettingsRouter = new Elysia()
             defaultPaymentAddress: true,
             selectedPaymentAddress: true,
             lastLoginAt: true,
+            monetizationSettings: {
+              select: {
+                paymentMethod: true,
+                paymentChainId: true,
+                subscriptionTier: true,
+                subscriptionStatus: true,
+                lastPaymentDate: true,
+              },
+            },
           },
         });
 
@@ -477,6 +523,14 @@ export const userSettingsRouter = new Elysia()
             privacySettings: sanitizedBody.privacySettings
               ? { set: JSON.stringify(sanitizedBody.privacySettings) }
               : undefined,
+            monetizationSettings: sanitizedBody.monetizationSettings
+              ? {
+                  upsert: {
+                    create: sanitizedBody.monetizationSettings,
+                    update: sanitizedBody.monetizationSettings,
+                  },
+                }
+              : undefined,
           },
           select: {
             walletAddress: true,
@@ -496,6 +550,15 @@ export const userSettingsRouter = new Elysia()
             defaultPaymentAddress: true,
             selectedPaymentAddress: true,
             lastLoginAt: true,
+            monetizationSettings: {
+              select: {
+                paymentMethod: true,
+                paymentChainId: true,
+                subscriptionTier: true,
+                subscriptionStatus: true,
+                lastPaymentDate: true,
+              },
+            },
           },
         });
 
