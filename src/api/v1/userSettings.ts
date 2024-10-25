@@ -22,15 +22,6 @@ const createPerformanceTracker = (label: string) => {
   };
 };
 
-// Define type-safe interfaces for user settings
-interface NotificationPreferences {
-  emailNotifications: boolean;
-}
-
-interface PrivacySettings {
-  profileVisibility: "public" | "private";
-  showEmail?: boolean;
-}
 type UserSettingsSchema = {
   username?: string;
   name?: string;
@@ -45,7 +36,7 @@ type UserSettingsSchema = {
     emailNotifications: boolean;
   };
   privacySettings?: {
-    profileVisibility: "public" | "private";
+    profileVisibility: "public" | "private" | "friends";
     showEmail?: boolean;
   };
   twoFactorEnabled?: boolean;
@@ -70,7 +61,11 @@ const userSettingsSchema = t.Object({
   ),
   privacySettings: t.Optional(
     t.Object({
-      profileVisibility: t.Union([t.Literal("public"), t.Literal("private")]),
+      profileVisibility: t.Union([
+        t.Literal("public"),
+        t.Literal("private"),
+        t.Literal("friends"),
+      ]),
       showEmail: t.Optional(t.Boolean()),
     })
   ),
@@ -228,15 +223,18 @@ const validateUserSettings = (input: unknown): UserSettingsInput => {
 
       if (
         typeof profileVisibility !== "string" ||
-        !["public", "private"].includes(profileVisibility)
+        !["public", "private", "friends"].includes(profileVisibility)
       ) {
         throw new Error(
-          'profileVisibility must be either "public" or "private"'
+          'profileVisibility must be either "public" or "private" or "friends"'
         );
       }
 
       result.privacySettings = {
-        profileVisibility: profileVisibility as "public" | "private",
+        profileVisibility: profileVisibility as
+          | "public"
+          | "private"
+          | "friends",
       };
 
       if (showEmail !== undefined) {
