@@ -2,27 +2,7 @@ import { Elysia } from "elysia";
 import prisma from "../../middleware/prismaclient";
 import { logger } from "../../utils/monitor";
 import { authPlugin, AuthError } from "../../middleware/authPlugin";
-import { Prisma } from "@prisma/client";
 import { enhancedRedactSensitiveInfo } from "../../utils/security";
-
-// Type-safe interfaces based on Prisma schema
-interface UserProfile {
-  walletAddress: string;
-  name: string | null;
-  email: string | null;
-  bio: string | null;
-  avatar: string | null;
-  chainId: string;
-  language: string | null;
-  theme: string | null;
-  githubProfileLink: string | null;
-  xProfileLink: string | null;
-  notificationPreferences: Prisma.JsonValue | null;
-  privacySettings: Prisma.JsonValue | null;
-  twoFactorEnabled: boolean;
-  defaultPaymentAddress: string | null;
-  selectedPaymentAddress: string | null;
-}
 
 // Performance tracking utility
 const createPerformanceTracker = (label: string) => {
@@ -71,11 +51,14 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
           theme: true,
           githubProfileLink: true,
           xProfileLink: true,
+          discordProfileLink: true,
           notificationPreferences: true,
           privacySettings: true,
           twoFactorEnabled: true,
           defaultPaymentAddress: true,
           selectedPaymentAddress: true,
+          solanaAddress: true,
+          linkedinProfileLink: true,
         },
       });
 
@@ -152,7 +135,10 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
             chainId: true,
             githubProfileLink: true,
             xProfileLink: true,
+            discordProfileLink: true,
             privacySettings: true,
+            solanaAddress: true,
+            linkedinProfileLink: true,
           },
         });
 
@@ -205,6 +191,12 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
               : undefined,
             xProfileLink: privacy?.showSocialLinks
               ? profileUser.xProfileLink
+              : undefined,
+            discordProfileLink: privacy?.showSocialLinks
+              ? profileUser.discordProfileLink
+              : undefined,
+            linkedinProfileLink: privacy?.showSocialLinks
+              ? profileUser.linkedinProfileLink
               : undefined,
           };
         }

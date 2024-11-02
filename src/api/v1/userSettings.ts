@@ -32,6 +32,7 @@ type UserSettingsSchema = {
   theme?: string;
   githubProfileLink?: string;
   xProfileLink?: string;
+  discordProfileLink?: string;
   notificationPreferences?: {
     emailNotifications: boolean;
   };
@@ -55,6 +56,7 @@ const userSettingsSchema = t.Object({
   theme: t.Optional(t.String()),
   githubProfileLink: t.Optional(t.String()),
   xProfileLink: t.Optional(t.String()),
+  discordProfileLink: t.Optional(t.String()),
   notificationPreferences: t.Optional(
     t.Object({
       emailNotifications: t.Boolean(),
@@ -200,6 +202,7 @@ const validateUserSettings = (input: unknown): UserSettingsInput => {
     "theme",
     "githubProfileLink",
     "xProfileLink",
+    "discordProfileLink",
     "defaultPaymentAddress",
     "selectedPaymentAddress",
   ];
@@ -315,6 +318,7 @@ export const userSettingsRouter = new Elysia()
         where: { walletAddress: userAddress },
         select: {
           walletAddress: true,
+          solanaAddress: true,
           username: true,
           name: true,
           email: true,
@@ -327,6 +331,7 @@ export const userSettingsRouter = new Elysia()
           xProfileLink: true,
           notificationPreferences: true,
           privacySettings: true,
+          discordProfileLink: true,
           twoFactorEnabled: true,
           defaultPaymentAddress: true,
           selectedPaymentAddress: true,
@@ -425,10 +430,12 @@ export const userSettingsRouter = new Elysia()
             theme: true,
             githubProfileLink: true,
             xProfileLink: true,
+            discordProfileLink: true,
             notificationPreferences: true,
             privacySettings: true,
             twoFactorEnabled: true,
             defaultPaymentAddress: true,
+            solanaAddress: true,
             selectedPaymentAddress: true,
             lastLoginAt: true,
             monetizationSettings: {
@@ -544,12 +551,15 @@ export const userSettingsRouter = new Elysia()
             theme: true,
             githubProfileLink: true,
             xProfileLink: true,
+            discordProfileLink: true,
             notificationPreferences: true,
             privacySettings: true,
             twoFactorEnabled: true,
             defaultPaymentAddress: true,
+            solanaAddress: true,
             selectedPaymentAddress: true,
             lastLoginAt: true,
+            linkedinProfileLink: true,
             monetizationSettings: {
               select: {
                 paymentMethod: true,
