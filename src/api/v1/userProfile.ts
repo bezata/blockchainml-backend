@@ -4,6 +4,26 @@ import { logger } from "../../utils/monitor";
 import { authPlugin, AuthError } from "../../middleware/authPlugin";
 import { enhancedRedactSensitiveInfo } from "../../utils/security";
 
+// Types for better type safety and documentation
+interface UserPrivacySettings {
+  profileVisibility: "public" | "private";
+  showEmail: boolean;
+  showSocialLinks: boolean;
+  showWalletAddresses: boolean;
+}
+
+interface NotificationPreferences {
+  email: boolean;
+  push: boolean;
+  discord: boolean;
+  browser: boolean;
+  marketingEmails: boolean;
+}
+
+// Cache configuration
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const profileCache = new Map<string, { data: any; timestamp: number }>();
+
 // Performance tracking utility
 const createPerformanceTracker = (label: string) => {
   const start = process.hrtime();
@@ -15,8 +35,28 @@ const createPerformanceTracker = (label: string) => {
   };
 };
 
+// Utility to validate and sanitize profile data
+const sanitizeProfileData = (data: any) => {
+  // Remove any potentially harmful HTML/scripts
+  const sanitize = (str: string | null) =>
+    str?.replace(/<[^>]*>/g, "").trim() ?? null;
+
+  return {
+    ...data,
+    name: sanitize(data.name),
+    bio: sanitize(data.bio),
+    email: data.email?.toLowerCase().trim(),
+    githubProfileLink: data.githubProfileLink?.trim(),
+    xProfileLink: data.xProfileLink?.trim(),
+    discordProfileLink: data.discordProfileLink?.trim(),
+    linkedinProfileLink: data.linkedinProfileLink?.trim(),
+  };
+};
+
 export const userProfileRouter = new Elysia({ prefix: "/user" })
   .use(authPlugin)
+
+  // Get own profile
   .get("/profile", async ({ authenticatedUser, store }) => {
     const perf = createPerformanceTracker("get-own-profile");
     const requestLogger = (store as any)?.requestLogger || logger;
@@ -31,6 +71,13 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
 
     try {
       const walletAddress = authenticatedUser.walletAddress;
+
+      // Check cache first
+      const cached = profileCache.get(walletAddress);
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return cached.data;
+      }
+
       requestLogger.info("Fetching own profile", {
         userAddress: enhancedRedactSensitiveInfo(
           { address: walletAddress },
@@ -59,6 +106,16 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
           selectedPaymentAddress: true,
           solanaAddress: true,
           linkedinProfileLink: true,
+          createdAt: true,
+          updatedAt: true,
+          _count: {
+            select: {
+              projects: true,
+              posts: true,
+              comments: true,
+              organizationMemberships: true,
+            },
+          },
         },
       });
 
@@ -74,6 +131,17 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
         throw new AuthError(404, "User profile not found");
       }
 
+      const sanitizedProfile = sanitizeProfileData(userProfile);
+      const redactedProfile = enhancedRedactSensitiveInfo(sanitizedProfile, {
+        preserveWalletAddress: true,
+      });
+
+      // Update cache
+      profileCache.set(walletAddress, {
+        data: redactedProfile,
+        timestamp: Date.now(),
+      });
+
       const duration = perf.end();
       requestLogger.info("Profile retrieved successfully", {
         userAddress: enhancedRedactSensitiveInfo(
@@ -84,9 +152,7 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
         fields: Object.keys(userProfile),
       });
 
-      return enhancedRedactSensitiveInfo(userProfile, {
-        preserveWalletAddress: true,
-      });
+      return redactedProfile;
     } catch (error) {
       const duration = perf.end();
       requestLogger.error("Error fetching user profile", {
@@ -104,6 +170,75 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
       throw new AuthError(500, "Failed to fetch user profile");
     }
   })
+
+  // Update own profile
+  .patch("/profile", async ({ body, authenticatedUser, store }) => {
+    const perf = createPerformanceTracker("update-profile");
+    const requestLogger = (store as any)?.requestLogger || logger;
+
+    if (!authenticatedUser) {
+      throw new AuthError(401, "Authentication required");
+    }
+
+    try {
+      const sanitizedData = sanitizeProfileData(body);
+      const walletAddress = authenticatedUser.walletAddress;
+
+      const updatedProfile = await prisma.user.update({
+        where: { walletAddress },
+        data: sanitizedData,
+        select: {
+          walletAddress: true,
+          name: true,
+          email: true,
+          bio: true,
+          avatar: true,
+          chainId: true,
+          language: true,
+          theme: true,
+          githubProfileLink: true,
+          xProfileLink: true,
+          discordProfileLink: true,
+          notificationPreferences: true,
+          privacySettings: true,
+          linkedinProfileLink: true,
+        },
+      });
+
+      // Invalidate cache
+      profileCache.delete(walletAddress);
+
+      const duration = perf.end();
+      requestLogger.info("Profile updated successfully", {
+        userAddress: enhancedRedactSensitiveInfo(
+          { address: walletAddress },
+          { preserveWalletAddress: true }
+        ).address,
+        duration,
+        updatedFields: Object.keys(sanitizedData),
+      });
+
+      return enhancedRedactSensitiveInfo(updatedProfile, {
+        preserveWalletAddress: true,
+      });
+    } catch (error) {
+      const duration = perf.end();
+      requestLogger.error("Error updating user profile", {
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+              }
+            : error,
+        duration,
+      });
+      throw new AuthError(500, "Failed to update user profile");
+    }
+  })
+
+  // Get public profile
   .get(
     "/profile/:walletAddress",
     async ({ params, authenticatedUser, store }) => {
@@ -111,6 +246,13 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
       const requestLogger = (store as any)?.requestLogger || logger;
 
       try {
+        // Check cache for public profile
+        const cacheKey = `public_${params.walletAddress}`;
+        const cached = profileCache.get(cacheKey);
+        if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+          return cached.data;
+        }
+
         requestLogger.info("Fetching public profile", {
           targetAddress: enhancedRedactSensitiveInfo(
             { address: params.walletAddress },
@@ -139,50 +281,47 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
             privacySettings: true,
             solanaAddress: true,
             linkedinProfileLink: true,
+            createdAt: true,
+            _count: {
+              select: {
+                projects: true,
+                posts: true,
+                comments: true,
+              },
+            },
           },
         });
 
         if (!profileUser) {
-          const duration = perf.end();
-          requestLogger.warn("Profile not found", {
-            targetAddress: enhancedRedactSensitiveInfo(
-              { address: params.walletAddress },
-              { preserveWalletAddress: true }
-            ).address,
-            duration,
-          });
           throw new AuthError(404, "User not found");
         }
 
         const isOwnProfile =
           authenticatedUser?.walletAddress === profileUser.walletAddress;
-        const privacy = profileUser.privacySettings as {
-          profileVisibility?: "public" | "private";
-          showEmail?: boolean;
-          showSocialLinks?: boolean;
-        } | null;
-        const isPublic = privacy?.profileVisibility === "public";
+        const privacy = (profileUser.privacySettings || {
+          profileVisibility: "public",
+          showEmail: false,
+          showSocialLinks: false,
+          showWalletAddresses: false,
+        }) as unknown as UserPrivacySettings;
+        const isPublic = privacy.profileVisibility === "public";
 
         const publicProfile = {
           walletAddress: profileUser.walletAddress,
           name: profileUser.name,
           avatar: profileUser.avatar,
           bio: profileUser.bio,
+          createdAt: profileUser.createdAt,
+          stats: {
+            projects: profileUser._count.projects,
+            posts: profileUser._count.posts,
+            comments: profileUser._count.comments,
+          },
         };
 
+        let profile;
         if (isOwnProfile || isPublic) {
-          const duration = perf.end();
-          requestLogger.info("Full profile access granted", {
-            targetAddress: enhancedRedactSensitiveInfo(
-              { address: params.walletAddress },
-              { preserveWalletAddress: true }
-            ).address,
-            isOwnProfile,
-            isPublic,
-            duration,
-          });
-
-          return {
+          profile = {
             ...publicProfile,
             chainId: profileUser.chainId,
             email: privacy?.showEmail ? profileUser.email : undefined,
@@ -198,21 +337,26 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
             linkedinProfileLink: privacy?.showSocialLinks
               ? profileUser.linkedinProfileLink
               : undefined,
+            solanaAddress: privacy?.showWalletAddresses
+              ? profileUser.solanaAddress
+              : undefined,
           };
+        } else {
+          profile = publicProfile;
         }
 
-        const duration = perf.end();
-        requestLogger.info("Limited profile access granted", {
-          targetAddress: enhancedRedactSensitiveInfo(
-            { address: params.walletAddress },
-            { preserveWalletAddress: true }
-          ).address,
-          duration,
-        });
-
-        return enhancedRedactSensitiveInfo(publicProfile, {
+        const sanitizedProfile = sanitizeProfileData(profile);
+        const redactedProfile = enhancedRedactSensitiveInfo(sanitizedProfile, {
           preserveWalletAddress: true,
         });
+
+        // Update cache
+        profileCache.set(cacheKey, {
+          data: redactedProfile,
+          timestamp: Date.now(),
+        });
+
+        return redactedProfile;
       } catch (error) {
         const duration = perf.end();
         requestLogger.error("Error fetching public profile", {
@@ -234,31 +378,6 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
         throw new AuthError(500, "Failed to fetch user profile");
       }
     }
-  )
-  .onError(({ error, set, store }) => {
-    const errorLogger = (store as any)?.requestLogger || logger;
-
-    if (error instanceof AuthError) {
-      errorLogger.warn("Auth error in profile router", {
-        statusCode: error.statusCode,
-        message: error.message,
-      });
-      set.status = error.statusCode;
-      return { error: error.message };
-    }
-
-    errorLogger.error("Unexpected error in profile router", {
-      error:
-        error instanceof Error
-          ? {
-              name: error.name,
-              message: error.message,
-              stack: error.stack,
-            }
-          : error,
-    });
-    set.status = 500;
-    return { error: "Internal Server Error" };
-  });
+  );
 
 export default userProfileRouter;

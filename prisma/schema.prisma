@@ -53,6 +53,7 @@ model Organization {
   websiteLink      String?
   linkedinOrgLink  String?
   discordServerLink String?
+  organizatonLogo   String?
   twitterOrgLink   String?
   githubOrgLink    String?
   createdAt        DateTime             @default(now())
