@@ -25,6 +25,17 @@ export const publicOrganizationRouter = new Elysia({ prefix: "/organization" })
               role: true,
             },
           },
+          followers: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  avatar: true,
+                },
+              },
+            },
+          },
           projects: {
             where: {
               visibility: "PUBLIC",
@@ -41,6 +52,7 @@ export const publicOrganizationRouter = new Elysia({ prefix: "/organization" })
             select: {
               members: true,
               projects: true,
+              followers: true,
             },
           },
         },
@@ -75,7 +87,14 @@ export const publicOrganizationRouter = new Elysia({ prefix: "/organization" })
         stats: {
           memberCount: organization._count.members,
           projectCount: organization._count.projects,
+          followerCount: organization._count.followers,
         },
+        followers: organization.followers.map((follower) => ({
+          userId: follower.user.id,
+          name: follower.user.name,
+          avatar: follower.user.avatar,
+          followedAt: follower.followedAt,
+        })),
         members: organization.members.map((member) => ({
           role: member.role.name,
           joinedAt: member.joinedAt,
@@ -151,6 +170,7 @@ export const publicOrganizationRouter = new Elysia({ prefix: "/organization" })
               select: {
                 members: true,
                 projects: true,
+                followers: true,
               },
             },
           },
@@ -193,6 +213,7 @@ export const publicOrganizationRouter = new Elysia({ prefix: "/organization" })
           stats: {
             memberCount: org._count.members,
             projectCount: org._count.projects,
+            followerCount: org._count.followers,
           },
         })),
         pagination: {
