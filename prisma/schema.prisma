@@ -1,3 +1,4 @@
+// Database configuration
 datasource db {
   provider = "mongodb"
   url      = env("DATABASE_URL")
@@ -7,30 +8,50 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// ==============================
+// User & Authentication Models
+// ==============================
+
+/// User model representing a registered user
 model User {
-  id                      String                @id @default(auto()) @map("_id") @db.ObjectId
-  walletAddress           String                @unique
-  chainId                 String
-  apiKey                  String                @unique
-  createdAt               DateTime              @default(now())
-  updatedAt               DateTime              @updatedAt
-  username                String                @unique
-  name                    String?
-  email                   String?
-  bio                     String?
-  avatar                  String?
+  id            String  @id @default(auto()) @map("_id") @db.ObjectId
+  walletAddress String  @unique
+  chainId       String
+  apiKey        String  @unique
+  username      String  @unique
+  name          String?
+  email         String?
+  bio           String?
+  avatar        String?
+
+  // User preferences
   language                String?
   theme                   String?
-  githubProfileLink       String?
-  xProfileLink            String?
-  discordProfileLink      String?
-  linkedinProfileLink     String?
-  defaultPaymentAddress   String?
-  selectedPaymentAddress  String?
-  twoFactorEnabled        Boolean               @default(false)
   notificationPreferences Json?
   privacySettings         Json?
- projects                 Project[]             @relation("UserProjects")
+
+  // Social links
+  githubProfileLink   String?
+  xProfileLink        String?
+  discordProfileLink  String?
+  linkedinProfileLink String?
+
+  // Payment info
+  defaultPaymentAddress  String?
+  selectedPaymentAddress String?
+  solanaAddress          String?
+
+  // Features
+  twoFactorEnabled Boolean @default(false)
+  hasOrganization  Boolean @default(false)
+
+  // Timestamps
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  lastLoginAt DateTime?
+
+  // Relations
+  projects                Project[]             @relation("UserProjects")
   repositories            Repository[]
   monetizationSettings    MonetizationSettings?
   datasets                Dataset[]
@@ -38,148 +59,33 @@ model User {
   comments                Comment[]             @relation("AuthorComments")
   sessions                Session[]
   refreshTokens           RefreshToken[]
-  lastLoginAt             DateTime?
-  solanaAddress           String?               
   organizationMemberships OrganizationMember[]
+  notifications           UserNotification[]
 
   @@index([email])
 }
 
-model Organization {
-  id                String               @id @default(auto()) @map("_id") @db.ObjectId
-  name              String
-  description       String?
-  badge            String?
-  websiteLink      String?
-  linkedinOrgLink  String?
-  discordServerLink String?
-  organizatonLogo   String?
-  twitterOrgLink   String?
-  githubOrgLink    String?
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
-  members          OrganizationMember[]
-  projects         Project[]            @relation("OrganizationProjects")
-}
-
-model OrganizationMember {
-  id             String       @id @default(auto()) @map("_id") @db.ObjectId
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  organizationId String       @db.ObjectId
-  user           User         @relation(fields: [userId], references: [id])
-  userId         String       @db.ObjectId
-  role           String       @default("MEMBER") // e.g., "ADMIN", "MEMBER", etc.
-  joinedAt       DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-
-  @@unique([organizationId, userId])
-  @@index([organizationId])
-  @@index([userId])
-}
-
-enum ProfileVisibility {
-  PUBLIC
-  PRIVATE
-}
-
-model Project {
-  id              String        @id @default(auto()) @map("_id") @db.ObjectId
-  name            String
-  description     String?
-  link            String?
-  status          String?       @default("ACTIVE") // e.g., "ACTIVE", "ARCHIVED", "COMPLETED"
-  visibility      String        @default("PUBLIC") // "PUBLIC" or "PRIVATE"
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
-  // User relationship (optional)
-  userId          String?       @db.ObjectId
-  user            User?         @relation("UserProjects", fields: [userId], references: [id])
-  
-  // Organization relationship (optional)
-  organizationId  String?       @db.ObjectId
-  organization    Organization? @relation("OrganizationProjects", fields: [organizationId], references: [id])
+model UserNotification {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  user       User      @relation(fields: [userId], references: [id])
+  userId     String    @db.ObjectId
+  type       String
+  title      String
+  message    String
+  data       Json?
+  sourceType String // e.g., "ORGANIZATION", "PROJECT", "SYSTEM", etc.
+  sourceId   String?   @db.ObjectId
+  isRead     Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  readAt     DateTime?
 
   @@index([userId])
-  @@index([organizationId])
-  @@index([visibility])
+  @@index([sourceType, sourceId])
+  @@index([createdAt])
+  @@index([isRead])
 }
 
-model Repository {
-  id     String @id @default(auto()) @map("_id") @db.ObjectId
-  name   String
-  link   String
-  userId String @db.ObjectId
-  user   User   @relation(fields: [userId], references: [id])
-
-  @@index([userId])
-}
-
-model MonetizationSettings {
-  id               String    @id @default(auto()) @map("_id") @db.ObjectId
-  userId           String    @unique @db.ObjectId
-  user             User      @relation(fields: [userId], references: [id])
-  paymentMethod    String?
-  paymentChainId   String?
-  subscriptionTier String?
-  subscriptionStatus String  @default("inactive")
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  lastPaymentDate  DateTime?
-}
-
-model Dataset {
-  id                String   @id @default(auto()) @map("_id") @db.ObjectId
-  title             String
-  description       String?
-  fileKey           String?
-  publicUrl         String?
-  downloads         Int      @default(0)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  user              User?    @relation(fields: [userWalletAddress], references: [walletAddress])
-  userWalletAddress String?
-  tags              String[]
-  isPublic          Boolean  @default(false)
-  fileType          String?
-
-  @@index([userWalletAddress])
-  @@index([isPublic])
-}
-
-model Post {
-  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
-  title               String
-  content             String
-  category            String
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-  author              User      @relation("AuthorPosts", fields: [authorWalletAddress], references: [walletAddress])
-  authorWalletAddress String
-  comments            Comment[]
-  likes               Int       @default(0)
-  tags                String[]
-
-  @@index([authorWalletAddress])
-  @@index([category])
-  @@index([tags])
-}
-
-model Comment {
-  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
-  content             String
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-  author              User     @relation("AuthorComments", fields: [authorWalletAddress], references: [walletAddress])
-  authorWalletAddress String
-  post                Post     @relation(fields: [postId], references: [id])
-  postId              String   @db.ObjectId
-  likes               Int      @default(0)
-
-  @@index([authorWalletAddress])
-  @@index([postId])
-}
-
+/// Session management for user authentication
 model Session {
   id                String   @id @default(auto()) @map("_id") @db.ObjectId
   userWalletAddress String
@@ -198,6 +104,7 @@ model Session {
   @@index([isValid])
 }
 
+/// Refresh tokens for JWT authentication
 model RefreshToken {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   token     String   @unique
@@ -209,4 +116,244 @@ model RefreshToken {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+// ==============================
+// Organization Models
+// ==============================
+
+/// Organization entity
+model Organization {
+  id          String  @id @default(auto()) @map("_id") @db.ObjectId
+  name        String  @unique
+  description String?
+  badge       String?
+
+  // Social and web presence
+  websiteLink       String?
+  linkedinOrgLink   String?
+  discordServerLink String?
+  organizationLogo  String?
+  twitterOrgLink    String?
+  githubOrgLink     String?
+
+  // Organization settings
+  isArchived     Boolean @default(false)
+  visibility     String  @default("PUBLIC")
+  revenueSharing Json?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  members                  OrganizationMember[]
+  projects                 Project[]                  @relation("OrganizationProjects")
+  roles                    OrganizationRole[]
+  OrganizationActivity     OrganizationActivity[]
+  OrganizationNotification OrganizationNotification[]
+
+  @@index([visibility])
+}
+
+model OrganizationActivity {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String       @db.ObjectId
+  actorId        String       @db.ObjectId
+  actorRole      String
+  action         String
+  details        Json?
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([createdAt])
+}
+
+model OrganizationNotification {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String       @db.ObjectId
+  recipientId    String       @db.ObjectId
+  type           String
+  title          String
+  message        String
+  data           Json?
+  isRead         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  readAt         DateTime?
+
+  @@index([organizationId])
+  @@index([recipientId])
+  @@index([createdAt])
+}
+
+/// Organization member relationship
+model OrganizationMember {
+  id             String           @id @default(auto()) @map("_id") @db.ObjectId
+  organization   Organization     @relation(fields: [organizationId], references: [id])
+  organizationId String           @db.ObjectId
+  user           User             @relation(fields: [userId], references: [id])
+  userId         String           @db.ObjectId
+  role           OrganizationRole @relation(fields: [roleId], references: [id])
+  roleId         String           @db.ObjectId
+  joinedAt       DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+/// Organization roles and permissions
+model OrganizationRole {
+  id             String               @id @default(auto()) @map("_id") @db.ObjectId
+  name           String
+  organization   Organization         @relation(fields: [organizationId], references: [id])
+  organizationId String               @db.ObjectId
+  permissions    Json // Store permissions as JSON
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  members        OrganizationMember[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+// ==============================
+// Content Models
+// ==============================
+
+/// Projects created by users or organizations
+model Project {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  description String?
+  link        String?
+  status      String?  @default("ACTIVE") // e.g., "ACTIVE", "ARCHIVED", "COMPLETED"
+  visibility  String   @default("PUBLIC")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  userId         String?       @db.ObjectId
+  user           User?         @relation("UserProjects", fields: [userId], references: [id])
+  organizationId String?       @db.ObjectId
+  organization   Organization? @relation("OrganizationProjects", fields: [organizationId], references: [id])
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([visibility])
+}
+
+/// Code repositories
+model Repository {
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  name   String
+  link   String
+  userId String @db.ObjectId
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+/// Datasets uploaded by users
+model Dataset {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  title       String
+  description String?
+  fileKey     String?
+  publicUrl   String?
+  downloads   Int      @default(0)
+  fileType    String?
+  tags        String[]
+  isPublic    Boolean  @default(false)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  user              User?   @relation(fields: [userWalletAddress], references: [walletAddress])
+  userWalletAddress String?
+
+  @@index([userWalletAddress])
+  @@index([isPublic])
+}
+
+// ==============================
+// Social Models
+// ==============================
+
+/// Blog posts
+model Post {
+  id       String   @id @default(auto()) @map("_id") @db.ObjectId
+  title    String
+  content  String
+  category String
+  tags     String[]
+  likes    Int      @default(0)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  author              User      @relation("AuthorPosts", fields: [authorWalletAddress], references: [walletAddress])
+  authorWalletAddress String
+  comments            Comment[]
+
+  @@index([authorWalletAddress])
+  @@index([category])
+  @@index([tags])
+}
+
+/// Comments on posts
+model Comment {
+  id      String @id @default(auto()) @map("_id") @db.ObjectId
+  content String
+  likes   Int    @default(0)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  author              User   @relation("AuthorComments", fields: [authorWalletAddress], references: [walletAddress])
+  authorWalletAddress String
+  post                Post   @relation(fields: [postId], references: [id])
+  postId              String @db.ObjectId
+
+  @@index([authorWalletAddress])
+  @@index([postId])
+}
+
+// ==============================
+// Payment Models
+// ==============================
+
+/// User monetization settings
+model MonetizationSettings {
+  id                 String    @id @default(auto()) @map("_id") @db.ObjectId
+  paymentMethod      String?
+  paymentChainId     String?
+  subscriptionTier   String?
+  subscriptionStatus String    @default("inactive")
+  lastPaymentDate    DateTime?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  userId String @unique @db.ObjectId
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+// Additional enums
+enum ProfileVisibility {
+  PUBLIC
+  PRIVATE
 }

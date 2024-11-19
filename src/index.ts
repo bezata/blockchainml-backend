@@ -28,7 +28,7 @@ type StoreType = {
 };
 
 // Performance monitoring helper
-const createPerformanceTracker = (label: string) => {
+export const createPerformanceTracker = (label: string) => {
   const start = process.hrtime();
   return {
     end: () => {
