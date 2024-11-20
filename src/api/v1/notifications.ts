@@ -1,6 +1,6 @@
 import { Elysia, t } from "elysia";
-import { PrismaClient } from "@prisma/client";
 import prisma from "@/middleware/prismaclient";
+import { PrismaClient } from "@prisma/client";
 import { authPlugin, AuthError } from "../../middleware/authPlugin";
 import {
   UserNotificationService,

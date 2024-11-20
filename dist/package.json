@@ -1,0 +1,48 @@
+{
+  "name": "app",
+  "version": "1.0.50",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run --watch src/index.ts",
+    "build": "bun build ./src/index.ts --outdir ./dist --target node",
+    "build:clean": "rm -rf dist && bun build ./src/index.ts --outdir ./dist --target node",
+    "postbuild": "cp package.json dist/ && cp .env dist/",
+    "prod": "bun run dist/index.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.696.0",
+    "@aws-sdk/s3-request-presigner": "^3.696.0",
+    "@elysiajs/bearer": "^1.1.2",
+    "@elysiajs/cors": "^1.1.1",
+    "@elysiajs/jwt": "^1.1.1",
+    "@elysiajs/opentelemetry": "^1.1.7",
+    "@elysiajs/swagger": "^1.1.6",
+    "@elysiajs/websocket": "^0.2.8",
+    "@opentelemetry/auto-instrumentations-node": "^0.50.2",
+    "@opentelemetry/sdk-node": "^0.53.0",
+    "@prisma/client": "^5.22.0",
+    "@reown/appkit-siwe": "^1.5.0",
+    "dotenv": "^16.4.5",
+    "elysia": "^1.1.25",
+    "elysia-rate-limit": "^4.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "prisma": "^5.22.0",
+    "winston": "^3.17.0",
+    "winston-daily-rotate-file": "^5.0.0",
+    "xss": "^1.0.15"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.9.1",
+    "bun-types": "^1.1.36",
+    "typescript": "^5.6.3"
+  },
+  "module": "src/index.js",
+  "trustedDependencies": [
+    "@prisma/client",
+    "@prisma/engines",
+    "prisma",
+    "protobufjs"
+  ]
+}

@@ -89,13 +89,13 @@ export const publicOrganizationRouter = new Elysia({ prefix: "/organization" })
           projectCount: organization._count.projects,
           followerCount: organization._count.followers,
         },
-        followers: organization.followers.map((follower) => ({
+        followers: organization.followers.map((follower: any) => ({
           userId: follower.user.id,
           name: follower.user.name,
           avatar: follower.user.avatar,
           followedAt: follower.followedAt,
         })),
-        members: organization.members.map((member) => ({
+        members: organization.members.map((member: any) => ({
           role: member.role.name,
           joinedAt: member.joinedAt,
           user: {
@@ -107,7 +107,7 @@ export const publicOrganizationRouter = new Elysia({ prefix: "/organization" })
             avatar: member.user.avatar,
           },
         })),
-        projects: organization.projects.map((project) => ({
+        projects: organization.projects.map((project: any) => ({
           id: project.id,
           name: project.name,
           description: project.description,
@@ -203,7 +203,7 @@ export const publicOrganizationRouter = new Elysia({ prefix: "/organization" })
       });
 
       return {
-        organizations: organizations.map((org) => ({
+        organizations: organizations.map((org: any) => ({
           id: org.id,
           name: org.name,
           description: org.description,

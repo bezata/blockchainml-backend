@@ -15,6 +15,9 @@ import { logger, loggerPlugin, maskSensitiveData } from "./utils/monitor";
 import { userProfileRouter } from "./api/v1/userProfile";
 import { authPlugin } from "./middleware/authPlugin";
 import os from "os";
+import { publicOrganizationRouter } from "./api/v1/organization";
+import { organizationSettingsRouter } from "./api/v1/organizationSettings";
+import { userNotificationsRouter } from "./api/v1/notifications";
 
 dotenv.config();
 
@@ -170,6 +173,15 @@ async function startServer() {
         .use(authRouter)
         .group("/user-settings", (app) =>
           app.use(authPlugin).use(userSettingsRouter)
+        )
+        .group("/organizations", (app) =>
+          app.use(authPlugin).use(publicOrganizationRouter)
+        )
+        .group("/organization-settings", (app) =>
+          app.use(authPlugin).use(organizationSettingsRouter)
+        )
+        .group("/notifications", (app) =>
+          app.use(authPlugin).use(userNotificationsRouter)
         )
         .group("", (app) => app.use(authPlugin).use(userProfileRouter))
         .use(usersRouter)
