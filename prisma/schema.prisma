@@ -9,10 +9,10 @@ generator client {
 }
 
 // ==============================
-// User & Authentication Models
+// Core Models
 // ==============================
 
-/// User model representing a registered user
+/// User model - Core user entity with authentication and profile information
 model User {
   id            String  @id @default(auto()) @map("_id") @db.ObjectId
   walletAddress String  @unique
@@ -20,11 +20,11 @@ model User {
   apiKey        String  @unique
   username      String  @unique
   name          String?
-  email         String?
+  email         String? @unique(map: "User_email_key")
   bio           String?
   avatar        String?
 
-  // User preferences
+  // User preferences & settings
   language                String?
   theme                   String?
   notificationPreferences Json?
@@ -36,14 +36,17 @@ model User {
   discordProfileLink  String?
   linkedinProfileLink String?
 
-  // Payment info
+  // Payment & blockchain info
   defaultPaymentAddress  String?
   selectedPaymentAddress String?
   solanaAddress          String?
 
-  // Features
+  // Features & flags
   twoFactorEnabled Boolean @default(false)
   hasOrganization  Boolean @default(false)
+  reputation       Int     @default(0)
+  isModerator      Boolean @default(false)
+  isAdmin          Boolean @default(false)
 
   // Timestamps
   createdAt   DateTime  @default(now())
@@ -51,79 +54,37 @@ model User {
   lastLoginAt DateTime?
 
   // Relations
-  projects                Project[]             @relation("UserProjects")
+  createdCommunities      Community[]            @relation("CreatedCommunities")
+  communityMemberships    CommunityMember[]
+  moderatedCommunities    CommunityModerator[]
+  posts                   Post[]                 @relation("AuthorPosts")
+  comments                Comment[]              @relation("AuthorComments")
+  votes                   Vote[]
+  savedPosts              SavedPost[]
+  reports                 Report[]               @relation("ReportedByUser")
+  followers               UserFollower[]         @relation("FollowedUsers")
+  following               UserFollower[]         @relation("FollowingUsers")
+  blockedUsers            BlockedUser[]          @relation("BlockedUsers")
+  blockedBy               BlockedUser[]          @relation("BlockedByUsers")
+  projects                Project[]              @relation("UserProjects")
   repositories            Repository[]
   monetizationSettings    MonetizationSettings?
   datasets                Dataset[]
-  posts                   Post[]                @relation("AuthorPosts")
-  comments                Comment[]             @relation("AuthorComments")
   sessions                Session[]
   refreshTokens           RefreshToken[]
   organizationMemberships OrganizationMember[]
-  followingOrganizations OrganizationFollower[] @relation("UserFollowingOrganizations")
+  followingOrganizations  OrganizationFollower[] @relation("UserFollowingOrganizations")
   notifications           UserNotification[]
+  actions                 UserAction[]
+  searchHistory           SearchHistory[]
+  contentPreferences      ContentPreference[]
+  bans                    BannedUser[]
+  mutes                   MutedUser[]
 
-  @@index([email])
+  @@index([reputation])
 }
 
-model UserNotification {
-  id         String    @id @default(auto()) @map("_id") @db.ObjectId
-  user       User      @relation(fields: [userId], references: [id])
-  userId     String    @db.ObjectId
-  type       String
-  title      String
-  message    String
-  data       Json?
-  sourceType String // e.g., "ORGANIZATION", "PROJECT", "SYSTEM", etc.
-  sourceId   String?   @db.ObjectId
-  isRead     Boolean   @default(false)
-  createdAt  DateTime  @default(now())
-  readAt     DateTime?
-
-  @@index([userId])
-  @@index([sourceType, sourceId])
-  @@index([createdAt])
-  @@index([isRead])
-}
-
-/// Session management for user authentication
-model Session {
-  id                String   @id @default(auto()) @map("_id") @db.ObjectId
-  userWalletAddress String
-  user              User     @relation(fields: [userWalletAddress], references: [walletAddress])
-  token             String   @unique
-  createdAt         DateTime @default(now())
-  expiresAt         DateTime
-  lastActivity      DateTime @default(now())
-  ipAddress         String?
-  userAgent         String?
-  deviceInfo        Json?
-  isValid           Boolean  @default(true)
-
-  @@index([userWalletAddress])
-  @@index([expiresAt])
-  @@index([isValid])
-}
-
-/// Refresh tokens for JWT authentication
-model RefreshToken {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  token     String   @unique
-  userId    String   @db.ObjectId
-  user      User     @relation(fields: [userId], references: [id])
-  createdAt DateTime @default(now())
-  expiresAt DateTime
-  isRevoked Boolean  @default(false)
-
-  @@index([userId])
-  @@index([expiresAt])
-}
-
-// ==============================
-// Organization Models
-// ==============================
-
-/// Organization entity
+/// Organization model
 model Organization {
   id          String  @id @default(auto()) @map("_id") @db.ObjectId
   name        String  @unique
@@ -148,47 +109,325 @@ model Organization {
   updatedAt DateTime @updatedAt
 
   // Relations
-  members                  OrganizationMember[]
-  projects                 Project[]                  @relation("OrganizationProjects")
-  roles                    OrganizationRole[]
-  OrganizationActivity     OrganizationActivity[]
-  OrganizationNotification OrganizationNotification[]
-  followers                OrganizationFollower[]     @relation("OrganizationFollowers")
+  members       OrganizationMember[]
+  projects      Project[]                  @relation("OrganizationProjects")
+  roles         OrganizationRole[]
+  activities    OrganizationActivity[]
+  notifications OrganizationNotification[]
+  followers     OrganizationFollower[]     @relation("OrganizationFollowers")
 
   @@index([visibility])
 }
 
-model OrganizationActivity {
-  id             String       @id @default(auto()) @map("_id") @db.ObjectId
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  organizationId String       @db.ObjectId
-  actorId        String       @db.ObjectId
-  actorRole      String
-  action         String
-  details        Json?
-  metadata       Json?
-  createdAt      DateTime     @default(now())
+/// Community model
+model Community {
+  id          String  @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  slug        String  @unique
+  description String?
+  icon        String?
+  banner      String?
 
-  @@index([organizationId])
+  // Community settings
+  isPrivate           Boolean  @default(false)
+  isNSFW              Boolean  @default(false)
+  language            String   @default("en")
+  allowedContentTypes String[] @default(["text", "link", "image"])
+
+  // Moderation settings
+  requirePostApproval Boolean @default(false)
+  autoSpamFilter      Boolean @default(true)
+  minimumKarma        Int     @default(0)
+
+  // Token gating configuration
+  tokenGated      Boolean @default(false)
+  tokenAddress    String?
+  tokenChainId    String?
+  requiredBalance Float?
+
+  // Community metadata
+  memberCount     Int @default(0)
+  postCount       Int @default(0)
+  activeUserCount Int @default(0)
+
+  // Rules and settings
+  rules       Json?
+  customEmoji Json?
+  tags        String[]
+  category    String?
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  creator      User                 @relation("CreatedCommunities", fields: [creatorId], references: [id])
+  creatorId    String               @db.ObjectId
+  members      CommunityMember[]
+  moderators   CommunityModerator[]
+  posts        Post[]               @relation("CommunityPosts")
+  reports      Report[]             @relation("CommunityReports")
+  bannedUsers  BannedUser[]
+  mutedUsers   MutedUser[]
+  autoModRules AutoModRule[]
+
+  @@unique([name, slug])
+  @@index([isPrivate])
+  @@index([tokenGated])
+  @@index([memberCount])
+  @@index([category])
   @@index([createdAt])
 }
 
-model OrganizationNotification {
-  id             String       @id @default(auto()) @map("_id") @db.ObjectId
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  organizationId String       @db.ObjectId
-  recipientId    String       @db.ObjectId
-  type           String
-  title          String
-  message        String
-  data           Json?
-  isRead         Boolean      @default(false)
-  createdAt      DateTime     @default(now())
-  readAt         DateTime?
+/// Post model
+model Post {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  title     String
+  content   String
+  type      String   @default("text") // text, link, image, video, poll
+  url       String? // For link posts
+  mediaUrls String[] // For image/video posts
 
-  @@index([organizationId])
-  @@index([recipientId])
+  // Post metadata
+  status    String  @default("active") // active, pending, removed, spam
+  isNSFW    Boolean @default(false)
+  isPinned  Boolean @default(false)
+  isLocked  Boolean @default(false)
+  isSpoiler Boolean @default(false)
+
+  // Metrics
+  score     Int @default(0)
+  views     Int @default(0)
+  upvotes   Int @default(0)
+  downvotes Int @default(0)
+
+  // Post details
+  flair    String?
+  tags     String[]
+  pollData Json? // For poll posts
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  author      User        @relation("AuthorPosts", fields: [authorId], references: [id])
+  authorId    String      @db.ObjectId
+  community   Community   @relation("CommunityPosts", fields: [communityId], references: [id])
+  communityId String      @db.ObjectId
+  votes       Vote[]
+  comments    Comment[]
+  savedBy     SavedPost[]
+  reports     Report[]    @relation("PostReports")
+
+  @@index([authorId])
+  @@index([communityId])
+  @@index([type])
+  @@index([status])
+  @@index([score])
   @@index([createdAt])
+}
+
+/// Comment model
+model Comment {
+  id      String @id @default(auto()) @map("_id") @db.ObjectId
+  content String
+  status  String @default("active") // active, removed, spam
+
+  // Metrics
+  score     Int @default(0)
+  upvotes   Int @default(0)
+  downvotes Int @default(0)
+
+  // Threading
+  depth Int    @default(0)
+  path  String // Materialized path for efficient tree traversal
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  author   User      @relation("AuthorComments", fields: [authorId], references: [id])
+  authorId String    @db.ObjectId
+  post     Post      @relation(fields: [postId], references: [id])
+  postId   String    @db.ObjectId
+  parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  parentId String?   @db.ObjectId
+  replies  Comment[] @relation("CommentReplies")
+  votes    Vote[]
+  reports  Report[]  @relation("CommentReports")
+
+  @@index([authorId])
+  @@index([postId])
+  @@index([parentId])
+  @@index([score])
+  @@index([path])
+}
+
+/// Voting system
+model Vote {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  value     Int // 1 for upvote, -1 for downvote
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String   @db.ObjectId
+  post      Post?    @relation(fields: [postId], references: [id])
+  postId    String?  @db.ObjectId
+  comment   Comment? @relation(fields: [commentId], references: [id])
+  commentId String?  @db.ObjectId
+  createdAt DateTime @default(now())
+
+  @@unique([userId, postId])
+  @@unique([userId, commentId])
+  @@index([userId])
+  @@index([postId])
+  @@index([commentId])
+}
+
+/// Community membership
+model CommunityMember {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String    @db.ObjectId
+  community   Community @relation(fields: [communityId], references: [id])
+  communityId String    @db.ObjectId
+  role        String    @default("member") // member, contributor, vip
+  reputation  Int       @default(0)
+  joinedAt    DateTime  @default(now())
+  lastActive  DateTime  @default(now())
+
+  @@unique([communityId, userId])
+  @@index([userId])
+  @@index([communityId])
+  @@index([role])
+  @@index([reputation])
+}
+
+/// Community moderators
+model CommunityModerator {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String    @db.ObjectId
+  community   Community @relation(fields: [communityId], references: [id])
+  communityId String    @db.ObjectId
+  permissions Json // Specific moderator permissions
+  addedAt     DateTime  @default(now())
+  addedBy     String    @db.ObjectId
+
+  @@unique([communityId, userId])
+  @@index([userId])
+  @@index([communityId])
+}
+
+/// Content reporting system
+model Report {
+  id      String  @id @default(auto()) @map("_id") @db.ObjectId
+  type    String // post, comment, user, community
+  reason  String
+  details String?
+  status  String  @default("pending") // pending, resolved, rejected
+
+  // Relations
+  reporter    User       @relation("ReportedByUser", fields: [reporterId], references: [id])
+  reporterId  String     @db.ObjectId
+  post        Post?      @relation("PostReports", fields: [postId], references: [id])
+  postId      String?    @db.ObjectId
+  comment     Comment?   @relation("CommentReports", fields: [commentId], references: [id])
+  commentId   String?    @db.ObjectId
+  community   Community? @relation("CommunityReports", fields: [communityId], references: [id])
+  communityId String?    @db.ObjectId
+
+  // Resolution
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+  resolution String?
+  resolvedBy String?   @db.ObjectId
+
+  @@index([type])
+  @@index([status])
+  @@index([reporterId])
+  @@index([createdAt])
+}
+
+/// User relationships
+model UserFollower {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  follower    User     @relation("FollowingUsers", fields: [followerId], references: [id])
+  followerId  String   @db.ObjectId
+  following   User     @relation("FollowedUsers", fields: [followingId], references: [id])
+  followingId String   @db.ObjectId
+  createdAt   DateTime @default(now())
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
+
+/// User blocking system
+model BlockedUser {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  blocker   User     @relation("BlockedUsers", fields: [blockerId], references: [id])
+  blockerId String   @db.ObjectId
+  blocked   User     @relation("BlockedByUsers", fields: [blockedId], references: [id])
+  blockedId String   @db.ObjectId
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
+/// Community bans
+model BannedUser {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String    @db.ObjectId
+  community   Community @relation(fields: [communityId], references: [id])
+  communityId String    @db.ObjectId
+  reason      String
+  bannedBy    String    @db.ObjectId
+  bannedAt    DateTime  @default(now())
+  expiresAt   DateTime?
+
+  @@unique([communityId, userId])
+  @@index([userId])
+  @@index([communityId])
+  @@index([expiresAt])
+}
+
+/// Community mutes
+model MutedUser {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String    @db.ObjectId
+  community   Community @relation(fields: [communityId], references: [id])
+  communityId String    @db.ObjectId
+  reason      String
+  mutedBy     String    @db.ObjectId
+  mutedAt     DateTime  @default(now())
+  expiresAt   DateTime
+
+  @@unique([communityId, userId])
+  @@index([userId])
+  @@index([communityId])
+  @@index([expiresAt])
+}
+
+/// Saved posts
+model SavedPost {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String   @db.ObjectId
+  post      Post     @relation(fields: [postId], references: [id])
+  postId    String   @db.ObjectId
+  createdAt DateTime @default(now())
+  category  String? // Optional categorization
+
+  @@unique([userId, postId])
+  @@index([userId])
+  @@index([postId])
+  @@index([category])
 }
 
 /// Organization member relationship
@@ -209,13 +448,13 @@ model OrganizationMember {
   @@index([roleId])
 }
 
-/// Organization roles and permissions
+/// Organization roles
 model OrganizationRole {
   id             String               @id @default(auto()) @map("_id") @db.ObjectId
   name           String
   organization   Organization         @relation(fields: [organizationId], references: [id])
   organizationId String               @db.ObjectId
-  permissions    Json // Store permissions as JSON
+  permissions    Json
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
   members        OrganizationMember[]
@@ -224,17 +463,62 @@ model OrganizationRole {
   @@index([organizationId])
 }
 
-// ==============================
-// Content Models
-// ==============================
+/// Organization followers
+model OrganizationFollower {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  organization   Organization @relation("OrganizationFollowers", fields: [organizationId], references: [id])
+  organizationId String       @db.ObjectId
+  user           User         @relation("UserFollowingOrganizations", fields: [userId], references: [id])
+  userId         String       @db.ObjectId
+  followedAt     DateTime     @default(now())
 
-/// Projects created by users or organizations
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+/// Organization activity tracking
+model OrganizationActivity {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String       @db.ObjectId
+  actorId        String       @db.ObjectId
+  actorRole      String
+  action         String
+  details        Json?
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([createdAt])
+}
+
+/// Organization notifications
+model OrganizationNotification {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String       @db.ObjectId
+  recipientId    String       @db.ObjectId
+  type           String
+  title          String
+  message        String
+  data           Json?
+  isRead         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  readAt         DateTime?
+
+  @@index([organizationId])
+  @@index([recipientId])
+  @@index([createdAt])
+}
+
+/// Projects
 model Project {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId
   name        String
   description String?
   link        String?
-  status      String?  @default("ACTIVE") // e.g., "ACTIVE", "ARCHIVED", "COMPLETED"
+  status      String?  @default("ACTIVE") // ACTIVE, ARCHIVED, COMPLETED
   visibility  String   @default("PUBLIC")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -250,7 +534,7 @@ model Project {
   @@index([visibility])
 }
 
-/// Code repositories
+/// Repositories
 model Repository {
   id     String @id @default(auto()) @map("_id") @db.ObjectId
   name   String
@@ -261,7 +545,7 @@ model Repository {
   @@index([userId])
 }
 
-/// Datasets uploaded by users
+/// Datasets
 model Dataset {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId
   title       String
@@ -272,69 +556,15 @@ model Dataset {
   fileType    String?
   tags        String[]
   isPublic    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
   user              User?   @relation(fields: [userWalletAddress], references: [walletAddress])
   userWalletAddress String?
 
   @@index([userWalletAddress])
   @@index([isPublic])
 }
-
-// ==============================
-// Social Models
-// ==============================
-
-/// Blog posts
-model Post {
-  id       String   @id @default(auto()) @map("_id") @db.ObjectId
-  title    String
-  content  String
-  category String
-  tags     String[]
-  likes    Int      @default(0)
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  author              User      @relation("AuthorPosts", fields: [authorWalletAddress], references: [walletAddress])
-  authorWalletAddress String
-  comments            Comment[]
-
-  @@index([authorWalletAddress])
-  @@index([category])
-  @@index([tags])
-}
-
-/// Comments on posts
-model Comment {
-  id      String @id @default(auto()) @map("_id") @db.ObjectId
-  content String
-  likes   Int    @default(0)
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  author              User   @relation("AuthorComments", fields: [authorWalletAddress], references: [walletAddress])
-  authorWalletAddress String
-  post                Post   @relation(fields: [postId], references: [id])
-  postId              String @db.ObjectId
-
-  @@index([authorWalletAddress])
-  @@index([postId])
-}
-
-// ==============================
-// Payment Models
-// ==============================
 
 /// User monetization settings
 model MonetizationSettings {
@@ -344,32 +574,155 @@ model MonetizationSettings {
   subscriptionTier   String?
   subscriptionStatus String    @default("inactive")
   lastPaymentDate    DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
   userId String @unique @db.ObjectId
   user   User   @relation(fields: [userId], references: [id])
 }
 
-// Additional enums
+/// User notifications
+model UserNotification {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  user       User      @relation(fields: [userId], references: [id])
+  userId     String    @db.ObjectId
+  type       String
+  title      String
+  message    String
+  data       Json?
+  sourceType String // ORGANIZATION, PROJECT, SYSTEM, etc.
+  sourceId   String?   @db.ObjectId
+  isRead     Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  readAt     DateTime?
+
+  @@index([userId])
+  @@index([sourceType, sourceId])
+  @@index([createdAt])
+  @@index([isRead])
+}
+
+/// Session management
+model Session {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  userWalletAddress String
+  user              User     @relation(fields: [userWalletAddress], references: [walletAddress])
+  token             String   @unique
+  createdAt         DateTime @default(now())
+  expiresAt         DateTime
+  lastActivity      DateTime @default(now())
+  ipAddress         String?
+  userAgent         String?
+  deviceInfo        Json?
+  isValid           Boolean  @default(true)
+
+  @@index([userWalletAddress])
+  @@index([expiresAt])
+  @@index([isValid])
+}
+
+/// Refresh tokens
+model RefreshToken {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  token     String   @unique
+  userId    String   @db.ObjectId
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// User actions tracking
+model UserAction {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String   @db.ObjectId
+  user       User     @relation(fields: [userId], references: [id])
+  type       String // post_create, comment_create, vote, report, etc.
+  targetId   String   @db.ObjectId
+  targetType String // post, comment, community, user
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([type])
+  @@index([targetId])
+  @@index([createdAt])
+}
+
+/// Moderation actions log
+model ModerationAction {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  type        String // ban, mute, remove_post, remove_comment, etc.
+  moderatorId String    @db.ObjectId
+  targetId    String    @db.ObjectId
+  targetType  String // user, post, comment, community
+  reason      String
+  metadata    Json?
+  communityId String?   @db.ObjectId
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime?
+  reversedAt  DateTime?
+  reversedBy  String?   @db.ObjectId
+
+  @@index([moderatorId])
+  @@index([targetId])
+  @@index([communityId])
+  @@index([createdAt])
+}
+
+/// Automated moderation rules
+model AutoModRule {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  communityId String    @db.ObjectId
+  community   Community @relation(fields: [communityId], references: [id])
+  name        String
+  description String?
+  type        String // keyword, regex, user_age, karma_threshold, etc.
+  config      Json // Rule configuration
+  action      String // remove, flag, notify_mods, etc.
+  isEnabled   Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([communityId])
+}
+
+/// Search history
+model SearchHistory {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  user        User     @relation(fields: [userId], references: [id])
+  query       String
+  type        String? // post, community, user
+  resultCount Int
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([query])
+  @@index([createdAt])
+}
+
+/// User content preferences
+model ContentPreference {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  user      User     @relation(fields: [userId], references: [id])
+  type      String // tag, category, content_type
+  value     String
+  weight    Float    @default(1.0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, type, value])
+  @@index([userId])
+  @@index([type])
+}
+
+// Enums
 enum ProfileVisibility {
   PUBLIC
   PRIVATE
-}
-
-// Add new model for Organization Followers
-model OrganizationFollower {
-  id             String       @id @default(auto()) @map("_id") @db.ObjectId
-  organization   Organization @relation("OrganizationFollowers", fields: [organizationId], references: [id])
-  organizationId String       @db.ObjectId
-  user           User         @relation("UserFollowingOrganizations", fields: [userId], references: [id])
-  userId         String       @db.ObjectId
-  followedAt     DateTime     @default(now())
-
-  @@unique([organizationId, userId])
-  @@index([organizationId])
-  @@index([userId])
 }
