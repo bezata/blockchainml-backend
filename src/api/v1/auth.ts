@@ -11,6 +11,7 @@ import { bearer } from "@elysiajs/bearer";
 import crypto from "crypto";
 import { logger, maskSensitiveData, loggerPlugin } from "../../utils/monitor";
 import authPlugin from "../../middleware/authPlugin";
+import { adjectives, nouns } from "../../const/const";
 
 logger.info("Starting auth.ts initialization");
 
@@ -33,44 +34,6 @@ export class AuthError extends Error {
     this.name = "AuthError";
   }
 }
-
-const adjectives = [
-  "Funny",
-  "Silly",
-  "Quirky",
-  "Zany",
-  "Wacky",
-  "Goofy",
-  "Hilarious",
-  "Amusing",
-  "Witty",
-  "Clever",
-  "Playful",
-  "Jolly",
-  "Merry",
-  "Joyful",
-  "Cheerful",
-  "Whimsical",
-];
-
-const nouns = [
-  "Panda",
-  "Penguin",
-  "Platypus",
-  "Narwhal",
-  "Unicorn",
-  "Dragon",
-  "Phoenix",
-  "Yeti",
-  "Sasquatch",
-  "Mermaid",
-  "Wizard",
-  "Ninja",
-  "Pirate",
-  "Astronaut",
-  "Dinosaur",
-  "Robot",
-];
 
 function generateRandomUsername(): string {
   const perf = {
