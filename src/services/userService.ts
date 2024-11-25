@@ -10,13 +10,17 @@ export class UserService {
 
   static async createUser(
     email: string,
-    name: string
+    name: string,
+    username: string,
+    walletAddress: string,
+    chainId: string
   ): Promise<{ user: any; apiKey: string }> {
     const apiKey = this.generateApiKey();
     const user = await prisma.user.create({
       data: {
         email,
         name,
+        username,
         apiKey,
         walletAddress: walletAddress,
         chainId: chainId,

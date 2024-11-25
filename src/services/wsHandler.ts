@@ -1,99 +1,99 @@
 import { Elysia, t } from "elysia";
-import { logger } from "@/utils/monitor";
-import { PrismaClient, Session, User } from "@prisma/client";
 import { jwt } from "@elysiajs/jwt";
+import { PrismaClient, User } from "@prisma/client";
+import { logger } from "@/utils/monitor";
 import { AuthError } from "@/api/v1/auth";
+import { createPerformanceTracker } from "@/index";
 
 const prisma = new PrismaClient();
-
 const JWT_SECRET = process.env.NEXTAUTH_SECRET;
 if (!JWT_SECRET) throw new Error("NEXTAUTH_SECRET is not set");
 
-type WebSocketMessage = {
-  type:
-    | "new_post"
-    | "new_comment"
-    | "post_liked"
-    | "comment_liked"
-    | "post_deleted"
-    | "comment_deleted";
-  data: any;
-};
+type MessageType =
+  | "new_post"
+  | "new_comment"
+  | "post_liked"
+  | "comment_liked"
+  | "post_deleted"
+  | "comment_deleted";
 
-interface AuthenticatedWebSocket extends WebSocket {
+interface WebSocketData {
   user: User;
+  topics: Set<string>;
 }
 
-class WSHandler {
-  private clients: Set<AuthenticatedWebSocket> = new Set();
+interface WebSocketMessage {
+  type: MessageType;
+  data: any;
+  topic?: string;
+}
 
-  public addClient(ws: AuthenticatedWebSocket) {
-    this.clients.add(ws);
-    logger.info(`New WebSocket client connected: ${ws.user.id}`);
+class WebSocketServer {
+  private topics = new Map<string, Set<ServerWebSocket<WebSocketData>>>();
+
+  public handleMessage(type: MessageType, data: any, topic?: string) {
+    const perf = createPerformanceTracker(`ws-${type}`);
+
+    try {
+      const message: WebSocketMessage = { type, data, topic };
+      if (topic) {
+        this.publishToTopic(topic, message);
+      } else {
+        this.broadcastMessage(message);
+      }
+
+      const duration = perf.end();
+      logger.info(`WebSocket message handled`, {
+        type,
+        topic,
+        duration,
+        dataSize: JSON.stringify(data).length,
+      });
+    } catch (error) {
+      const duration = perf.end();
+      logger.error(`Error handling WebSocket message`, {
+        error:
+          error instanceof Error
+            ? {
+                name: error.name,
+                message: error.message,
+                stack: error.stack,
+              }
+            : error,
+        type,
+        topic,
+        duration,
+      });
+    }
   }
 
-  public removeClient(ws: AuthenticatedWebSocket) {
-    this.clients.delete(ws);
-    logger.info(`WebSocket client disconnected: ${ws.user.id}`);
+  private broadcastMessage(message: WebSocketMessage) {
+    for (const [topic, clients] of this.topics) {
+      this.publishToTopic(topic, message);
+    }
   }
 
-  public broadcast(message: WebSocketMessage) {
-    this.clients.forEach((client) => {
+  private publishToTopic(topic: string, message: WebSocketMessage) {
+    const clients = this.topics.get(topic);
+    if (!clients) return;
+
+    clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(message));
+        // Batch multiple send operations for better performance
+        client.cork(() => {
+          client.send(JSON.stringify(message));
+        });
       }
     });
   }
-
-  public newPost(post: any) {
-    this.broadcast({ type: "new_post", data: post });
-  }
-
-  public newComment(comment: any) {
-    this.broadcast({ type: "new_comment", data: comment });
-  }
-
-  public postLiked(postId: string) {
-    this.broadcast({ type: "post_liked", data: { id: postId } });
-  }
-
-  public commentLiked(commentId: string) {
-    this.broadcast({ type: "comment_liked", data: { id: commentId } });
-  }
-
-  public postDeleted(postId: string) {
-    this.broadcast({ type: "post_deleted", data: { id: postId } });
-  }
-
-  public commentDeleted(commentId: string) {
-    this.broadcast({ type: "comment_deleted", data: { id: commentId } });
-  }
-
-  public async authenticateConnection(token: string): Promise<User | null> {
-    try {
-      const jwtInstance = jwt({ name: "jwt", secret: JWT_SECRET || "" });
-      const payload = await jwtInstance.decorator.jwt.verify(token);
-      if (!payload || typeof payload !== "object" || !("sub" in payload)) {
-        return null;
-      }
-
-      const user = await prisma.user.findUnique({
-        where: { id: payload.sub as string },
-      });
-
-      return user;
-    } catch (error) {
-      logger.error("Failed to authenticate WebSocket connection:", error);
-      return null;
-    }
-  }
 }
 
-export const wsHandler = new WSHandler();
+const wsServer = new WebSocketServer();
 
-const app = new Elysia()
+export default new Elysia()
   .use(jwt({ name: "jwt", secret: JWT_SECRET }))
   .ws("/ws", {
+    // Validate message schema
     body: t.Object({
       type: t.Union([
         t.Literal("new_post"),
@@ -104,34 +104,164 @@ const app = new Elysia()
         t.Literal("comment_deleted"),
       ]),
       data: t.Any(),
+      topic: t.Optional(t.String()),
     }),
-    beforeHandle: async ({ request, set }) => {
-      const authHeader = request.headers.get("Authorization");
-      if (!authHeader || !authHeader.startsWith("Bearer ")) {
-        set.status = 401;
-        throw new AuthError(401, "Invalid authorization header");
-      }
-      const token = authHeader.split(" ")[1];
-      const user = await wsHandler.authenticateConnection(token);
-      if (!user) {
-        set.status = 401;
-        throw new AuthError(401, "Unauthorized");
-      }
-      return { user };
-    },
-    open(ws: any) {
-      wsHandler.addClient(ws as AuthenticatedWebSocket);
-    },
-    message(ws: any, message: WebSocketMessage) {
-      logger.info(`Received WebSocket message from ${ws.user.id}:`, message);
-      wsHandler.broadcast(message);
-    },
-    close(ws: any) {
-      wsHandler.removeClient(ws as AuthenticatedWebSocket);
-    },
-  })
-  .listen(4001);
 
-logger.info(
-  `WebSocket server is running on ${app.server?.hostname}:${app.server?.port}`
-);
+    // WebSocket configuration
+    idleTimeout: 30, // 30 seconds idle timeout
+    maxPayloadLength: 64 * 1024, // 64KB max message size
+    backpressureLimit: 1024 * 1024, // 1MB backpressure limit
+    closeOnBackpressureLimit: true,
+    perMessageDeflate: true, // Enable compression
+
+    // Authenticate connection
+    beforeHandle: async ({ request, set }) => {
+      const perf = createPerformanceTracker("ws-auth");
+
+      try {
+        const authHeader = request.headers.get("Authorization");
+        if (!authHeader?.startsWith("Bearer ")) {
+          throw new AuthError(401, "Invalid authorization header");
+        }
+
+        const token = authHeader.split(" ")[1];
+        const jwtInstance = jwt({ name: "jwt", secret: JWT_SECRET });
+        const payload = await jwtInstance.decorator.jwt.verify(token);
+
+        if (!payload || typeof payload !== "object" || !("sub" in payload)) {
+          throw new AuthError(401, "Invalid token");
+        }
+
+        const user = await prisma.user.findUnique({
+          where: { id: payload.sub as string },
+        });
+
+        if (!user) {
+          throw new AuthError(401, "User not found");
+        }
+
+        const duration = perf.end();
+        logger.info("WebSocket connection authenticated", {
+          userId: user.id,
+          duration,
+        });
+
+        return { user };
+      } catch (error) {
+        const duration = perf.end();
+        logger.error("WebSocket authentication failed", {
+          error:
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                  stack: error.stack,
+                }
+              : error,
+          duration,
+        });
+        throw error;
+      }
+    },
+
+    // Handle new connections
+    open(ws: ServerWebSocket<WebSocketData>) {
+      const perf = createPerformanceTracker("ws-open");
+
+      try {
+        // Subscribe to user-specific topics
+        const userTopic = `user:${ws.data.user.id}`;
+        ws.subscribe(userTopic);
+        ws.data.topics = new Set([userTopic]);
+
+        const duration = perf.end();
+        logger.info("WebSocket connection opened", {
+          userId: ws.data.user.id,
+          topics: Array.from(ws.data.topics),
+          duration,
+        });
+      } catch (error) {
+        const duration = perf.end();
+        logger.error("Error in WebSocket open handler", {
+          error:
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                  stack: error.stack,
+                }
+              : error,
+          userId: ws.data.user.id,
+          duration,
+        });
+      }
+    },
+
+    // Handle messages
+    message(ws: ServerWebSocket<WebSocketData>, message: WebSocketMessage) {
+      const perf = createPerformanceTracker("ws-message");
+
+      try {
+        if (message.topic) {
+          ws.publish(message.topic, JSON.stringify(message));
+        } else {
+          wsServer.handleMessage(message.type, message.data, message.topic);
+        }
+
+        const duration = perf.end();
+        logger.info("WebSocket message processed", {
+          userId: ws.data.user.id,
+          type: message.type,
+          topic: message.topic,
+          duration,
+        });
+      } catch (error) {
+        const duration = perf.end();
+        logger.error("Error processing WebSocket message", {
+          error:
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                  stack: error.stack,
+                }
+              : error,
+          userId: ws.data.user.id,
+          messageType: message.type,
+          duration,
+        });
+      }
+    },
+
+    // Handle disconnections
+    close(ws: ServerWebSocket<WebSocketData>) {
+      const perf = createPerformanceTracker("ws-close");
+
+      try {
+        // Unsubscribe from all topics
+        ws.data.topics.forEach((topic) => {
+          ws.unsubscribe(topic);
+        });
+
+        const duration = perf.end();
+        logger.info("WebSocket connection closed", {
+          userId: ws.data.user.id,
+          duration,
+        });
+      } catch (error) {
+        const duration = perf.end();
+        logger.error("Error in WebSocket close handler", {
+          error:
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                  stack: error.stack,
+                }
+              : error,
+          userId: ws.data.user.id,
+          duration,
+        });
+      }
+    },
+  });

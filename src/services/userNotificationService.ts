@@ -18,6 +18,7 @@ export enum SourceType {
   PROJECT = "PROJECT",
   SYSTEM = "SYSTEM",
   USER = "USER",
+  MESSAGING = "MESSAGING",
 }
 
 interface NotificationPreferences {

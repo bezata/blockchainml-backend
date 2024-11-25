@@ -14,74 +14,90 @@ generator client {
 
 /// User model - Core user entity with authentication and profile information
 model User {
+  // Core identity fields
   id            String  @id @default(auto()) @map("_id") @db.ObjectId
-  walletAddress String  @unique
+  walletAddress String  @unique // Primary Web3 identity
   chainId       String
-  apiKey        String  @unique
-  username      String  @unique
-  name          String?
-  email         String? @unique(map: "User_email_key")
-  bio           String?
-  avatar        String?
+  username      String  @unique // Public display name
+  name          String? // Full/Display name
+  email         String? @unique // User email
+  bio           String? // User biography
+  avatar        String? // Profile picture
 
-  // User preferences & settings
-  language                String?
-  theme                   String?
-  notificationPreferences Json?
-  privacySettings         Json?
+  // Authentication & Security
+  apiKey           String         @unique
+  twoFactorEnabled Boolean        @default(false)
+  lastLoginAt      DateTime?
+  lastSeen         DateTime?
+  sessions         Session[]
+  refreshTokens    RefreshToken[]
 
-  // Social links
+  // Web3 & Payment Information
+  defaultPaymentAddress  String?
+  selectedPaymentAddress String?
+  solanaAddress          String?
+  monetizationSettings   MonetizationSettings?
+
+  // User Preferences
+  language                String?             @default("en")
+  theme                   String?             @default("light")
+  notificationPreferences Json? // Email, push settings
+  privacySettings         Json? // Visibility settings
+  contentPreferences      ContentPreference[]
+
+  // Social Links
   githubProfileLink   String?
   xProfileLink        String?
   discordProfileLink  String?
   linkedinProfileLink String?
 
-  // Payment & blockchain info
-  defaultPaymentAddress  String?
-  selectedPaymentAddress String?
-  solanaAddress          String?
+  // User Status & Roles
+  reputation      Int     @default(0)
+  isModerator     Boolean @default(false)
+  isAdmin         Boolean @default(false)
+  hasOrganization Boolean @default(false)
+  status          String? @default("active") // active, suspended, deleted
 
-  // Features & flags
-  twoFactorEnabled Boolean @default(false)
-  hasOrganization  Boolean @default(false)
-  reputation       Int     @default(0)
-  isModerator      Boolean @default(false)
-  isAdmin          Boolean @default(false)
+  // Messaging & Social Features
+   sentMessages            Message[]                 @relation("SentMessages")
+  conversationParticipant ConversationParticipant[]  // New relation
+  followers     UserFollower[]            @relation("FollowedUsers")
+  following     UserFollower[]            @relation("FollowingUsers")
+  blockedUsers  BlockedUser[]             @relation("BlockedUsers")
+  blockedBy     BlockedUser[]             @relation("BlockedByUsers")
+  notifications UserNotification[]
 
-  // Timestamps
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  lastLoginAt DateTime?
+  // Content Creation & Interaction
+  posts         Post[]          @relation("AuthorPosts")
+  comments      Comment[]       @relation("AuthorComments")
+  votes         Vote[]
+  savedPosts    SavedPost[]
+  searchHistory SearchHistory[]
+  projects      Project[]       @relation("UserProjects")
+  repositories  Repository[]
+  datasets      Dataset[]
 
-  // Relations
+  // Community Participation
   createdCommunities      Community[]            @relation("CreatedCommunities")
   communityMemberships    CommunityMember[]
   moderatedCommunities    CommunityModerator[]
-  posts                   Post[]                 @relation("AuthorPosts")
-  comments                Comment[]              @relation("AuthorComments")
-  votes                   Vote[]
-  savedPosts              SavedPost[]
-  reports                 Report[]               @relation("ReportedByUser")
-  followers               UserFollower[]         @relation("FollowedUsers")
-  following               UserFollower[]         @relation("FollowingUsers")
-  blockedUsers            BlockedUser[]          @relation("BlockedUsers")
-  blockedBy               BlockedUser[]          @relation("BlockedByUsers")
-  projects                Project[]              @relation("UserProjects")
-  repositories            Repository[]
-  monetizationSettings    MonetizationSettings?
-  datasets                Dataset[]
-  sessions                Session[]
-  refreshTokens           RefreshToken[]
   organizationMemberships OrganizationMember[]
   followingOrganizations  OrganizationFollower[] @relation("UserFollowingOrganizations")
-  notifications           UserNotification[]
-  actions                 UserAction[]
-  searchHistory           SearchHistory[]
-  contentPreferences      ContentPreference[]
-  bans                    BannedUser[]
-  mutes                   MutedUser[]
+
+  // Moderation & Reports
+  reports Report[]     @relation("ReportedByUser")
+  bans    BannedUser[]
+  mutes   MutedUser[]
+  actions UserAction[] // User activity tracking
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([reputation])
+  @@index([status])
+  @@index([createdAt])
+  @@index([lastSeen])
 }
 
 /// Organization model
@@ -703,6 +719,64 @@ model SearchHistory {
 
   @@index([userId])
   @@index([query])
+  @@index([createdAt])
+}
+
+// Join table for User-Conversation many-to-many relationship
+model ConversationParticipant {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  conversationId String       @db.ObjectId
+  user          User         @relation(fields: [walletAddress], references: [walletAddress])
+  walletAddress String
+  isAdmin       Boolean      @default(false)
+  joinedAt      DateTime     @default(now())
+  leftAt        DateTime?
+  lastReadAt    DateTime?
+
+  @@unique([conversationId, walletAddress])
+  @@index([conversationId])
+  @@index([walletAddress])
+  @@index([joinedAt])
+}
+
+model Conversation {
+  id            String    @id @default(auto()) @map("_id") @db.ObjectId
+  participants  ConversationParticipant[]  // Updated relation
+  messages      Message[]
+  lastMessageAt DateTime  @default(now())
+  lastMessage   String?
+  messageCount  Int       @default(0)
+  isGroup       Boolean   @default(false)
+  groupName     String?
+  groupAvatar   String?
+  metadata      Json?     // muted, pinned, etc.
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([lastMessageAt])
+  @@index([createdAt])
+}
+
+
+model Message {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  conversationId String       @db.ObjectId
+  sender         User         @relation("SentMessages", fields: [walletAddress], references: [walletAddress])
+  walletAddress  String
+  content        String       // Encrypted content
+  readBy         String[]     // Array of wallet addresses
+  replyTo        String?      @db.ObjectId
+  type           String       @default("text")
+  metadata       Json?        // reactions, etc.
+  isEdited       Boolean      @default(false)
+  editedAt       DateTime?
+  createdAt      DateTime     @default(now())
+  deletedAt      DateTime?    // Soft delete
+
+  @@index([conversationId])
+  @@index([walletAddress])
   @@index([createdAt])
 }
 

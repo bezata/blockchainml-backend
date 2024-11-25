@@ -7,30 +7,12 @@ import {
   NotificationType,
   SourceType,
 } from "@/services/userNotificationService";
-
-const notificationService = new UserNotificationService(
-  prisma as unknown as PrismaClient
-);
-
-const NotificationSchema = t.Object({
-  type: t.Enum(NotificationType),
-  title: t.String(),
-  message: t.String(),
-  sourceType: t.Enum(SourceType),
-  sourceId: t.Optional(t.String()),
-  data: t.Optional(t.Object({})),
-});
-
-const UpdateNotificationSchema = t.Object({
-  isRead: t.Boolean(),
-});
-
-const QuerySchema = t.Object({
-  unreadOnly: t.Optional(t.Boolean()),
-  limit: t.Optional(t.Number()),
-  offset: t.Optional(t.Number()),
-  sourceType: t.Optional(t.Enum(SourceType)),
-});
+import {
+  notificationService,
+  NotificationSchema,
+  UpdateNotificationSchema,
+  QuerySchema,
+} from "@/types/notifications/notificaitons";
 
 export const userNotificationsRouter = new Elysia({ prefix: "/notifications" })
   .use(authPlugin)

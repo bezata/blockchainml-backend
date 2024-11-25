@@ -6,20 +6,7 @@ import { enhancedRedactSensitiveInfo } from "../../utils/security";
 import { OrganizationActivityLogger } from "@/services/organizationActiviy";
 import { ActivityAction, OrganizationPermissions } from "@/types/types";
 import { PrismaClient } from "@prisma/client";
-
-interface OrganizationData {
-  name: string;
-  description?: string | null;
-  badge?: string | null;
-  websiteLink?: string | null;
-  linkedinOrgLink?: string | null;
-  discordServerLink?: string | null;
-  twitterOrgLink?: string | null;
-  githubOrgLink?: string | null;
-  organizationLogo?: string | null;
-  visibility?: "PUBLIC" | "PRIVATE";
-  revenueSharing?: Record<string, any>;
-}
+import { OrganizationData } from "@/types/organization/setting";
 
 const activityLogger = new OrganizationActivityLogger(
   prisma as unknown as PrismaClient

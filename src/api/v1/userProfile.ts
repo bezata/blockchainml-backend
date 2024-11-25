@@ -3,22 +3,10 @@ import prisma from "../../middleware/prismaclient";
 import { logger } from "../../utils/monitor";
 import { authPlugin, AuthError } from "../../middleware/authPlugin";
 import { enhancedRedactSensitiveInfo } from "../../utils/security";
-
-// Types for better type safety and documentation
-interface UserPrivacySettings {
-  profileVisibility: "public" | "private";
-  showEmail: boolean;
-  showSocialLinks: boolean;
-  showWalletAddresses: boolean;
-}
-
-interface NotificationPreferences {
-  email: boolean;
-  push: boolean;
-  discord: boolean;
-  browser: boolean;
-  marketingEmails: boolean;
-}
+import {
+  UserPrivacySettings,
+  NotificationPreferences,
+} from "@/types/userProfile/userProfile";
 
 // Cache configuration
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
