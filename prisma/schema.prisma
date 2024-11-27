@@ -59,13 +59,13 @@ model User {
   status          String? @default("active") // active, suspended, deleted
 
   // Messaging & Social Features
-   sentMessages            Message[]                 @relation("SentMessages")
-  conversationParticipant ConversationParticipant[]  // New relation
-  followers     UserFollower[]            @relation("FollowedUsers")
-  following     UserFollower[]            @relation("FollowingUsers")
-  blockedUsers  BlockedUser[]             @relation("BlockedUsers")
-  blockedBy     BlockedUser[]             @relation("BlockedByUsers")
-  notifications UserNotification[]
+  sentMessages            Message[]                 @relation("SentMessages")
+  conversationParticipant ConversationParticipant[] // New relation
+  followers               UserFollower[]            @relation("FollowedUsers")
+  following               UserFollower[]            @relation("FollowingUsers")
+  blockedUsers            BlockedUser[]             @relation("BlockedUsers")
+  blockedBy               BlockedUser[]             @relation("BlockedByUsers")
+  notifications           UserNotification[]
 
   // Content Creation & Interaction
   posts         Post[]          @relation("AuthorPosts")
@@ -563,27 +563,29 @@ model Repository {
 
 /// Datasets
 model Dataset {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  title       String
-  description String?
-  fileKey     String?
-  publicUrl   String?
-  downloads   Int      @default(0)
-  fileType    String?
-  tags        String[]
-  isPublic    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  isPrivate   Boolean  @default(false)
-  files     File[]
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  title         String
+  description   String?
+  fileKey       String?
+  publicUrl     String?
+  downloads     Int      @default(0)
+  fileType      String?
+  tags          String[]
+  accessibility String   @default("PUBLIC")
+  files         File[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  user              User?   @relation(fields: [userWalletAddress], references: [walletAddress])
+  user              User?      @relation(fields: [userWalletAddress], references: [walletAddress])
   userWalletAddress String?
+  activities        Activity[]
 
   @@index([userWalletAddress])
-  @@index([isPublic])
+  @@index([accessibility])
+  @@index([createdAt, accessibility])
+  @@index([tags])
+  @@index([downloads])
 }
-
 /// User monetization settings
 model MonetizationSettings {
   id                 String    @id @default(auto()) @map("_id") @db.ObjectId
@@ -729,12 +731,12 @@ model ConversationParticipant {
   id             String       @id @default(auto()) @map("_id") @db.ObjectId
   conversation   Conversation @relation(fields: [conversationId], references: [id])
   conversationId String       @db.ObjectId
-  user          User         @relation(fields: [walletAddress], references: [walletAddress])
-  walletAddress String
-  isAdmin       Boolean      @default(false)
-  joinedAt      DateTime     @default(now())
-  leftAt        DateTime?
-  lastReadAt    DateTime?
+  user           User         @relation(fields: [walletAddress], references: [walletAddress])
+  walletAddress  String
+  isAdmin        Boolean      @default(false)
+  joinedAt       DateTime     @default(now())
+  leftAt         DateTime?
+  lastReadAt     DateTime?
 
   @@unique([conversationId, walletAddress])
   @@index([conversationId])
@@ -743,23 +745,22 @@ model ConversationParticipant {
 }
 
 model Conversation {
-  id            String    @id @default(auto()) @map("_id") @db.ObjectId
-  participants  ConversationParticipant[]  // Updated relation
+  id            String                    @id @default(auto()) @map("_id") @db.ObjectId
+  participants  ConversationParticipant[] // Updated relation
   messages      Message[]
-  lastMessageAt DateTime  @default(now())
+  lastMessageAt DateTime                  @default(now())
   lastMessage   String?
-  messageCount  Int       @default(0)
-  isGroup       Boolean   @default(false)
+  messageCount  Int                       @default(0)
+  isGroup       Boolean                   @default(false)
   groupName     String?
   groupAvatar   String?
-  metadata      Json?     // muted, pinned, etc.
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  metadata      Json? // muted, pinned, etc.
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
 
   @@index([lastMessageAt])
   @@index([createdAt])
 }
-
 
 model Message {
   id             String       @id @default(auto()) @map("_id") @db.ObjectId
@@ -767,15 +768,15 @@ model Message {
   conversationId String       @db.ObjectId
   sender         User         @relation("SentMessages", fields: [walletAddress], references: [walletAddress])
   walletAddress  String
-  content        String       // Encrypted content
-  readBy         String[]     // Array of wallet addresses
+  content        String // Encrypted content
+  readBy         String[] // Array of wallet addresses
   replyTo        String?      @db.ObjectId
   type           String       @default("text")
-  metadata       Json?        // reactions, etc.
+  metadata       Json? // reactions, etc.
   isEdited       Boolean      @default(false)
   editedAt       DateTime?
   createdAt      DateTime     @default(now())
-  deletedAt      DateTime?    // Soft delete
+  deletedAt      DateTime? // Soft delete
 
   @@index([conversationId])
   @@index([walletAddress])
@@ -803,6 +804,15 @@ enum ProfileVisibility {
   PRIVATE
 }
 
+enum ActivityType {
+  DATASET_CREATED
+  DATASET_UPDATED
+  FILE_ADDED
+  FILE_REMOVED
+  VERSION_CREATED
+  DOWNLOAD_STARTED
+}
+
 model File {
   id          String   @id @default(auto()) @map("_id") @db.ObjectId
   name        String
@@ -811,6 +821,18 @@ model File {
   contentType String
   dataset     Dataset  @relation(fields: [datasetId], references: [id])
   datasetId   String   @db.ObjectId
+  metadata    Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+model Activity {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  type      String
+  datasetId String   @db.ObjectId // Added @db.ObjectId here
+  userId    String
+  createdAt DateTime @default(now())
+
+  dataset Dataset @relation(fields: [datasetId], references: [id])
+}
+

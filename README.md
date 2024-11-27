@@ -1,264 +1,190 @@
 # BlockchainML API Documentation
 
-## Table of Contents
-
-1. [Introduction](#introduction)
-2. [Authentication](#authentication)
-3. [API Endpoints](#api-endpoints)
-   - [Datasets](#datasets)
-   - [Users](#users)
-   - [Trending](#trending)
-4. [Error Handling](#error-handling)
-5. [Rate Limiting](#rate-limiting)
-6. [OpenTelemetry Integration](#opentelemetry-integration)
-7. [Security Considerations](#security-considerations)
-8. [Examples](#examples)
-
 ## Introduction
 
-The BlockchainML API provides access to blockchain-related datasets and machine learning models. This API is built using Elysia, a performant Node.js web framework, and integrates various features such as authentication, rate limiting, and OpenTelemetry for observability.
+BlockchainML API provides access to blockchain-related datasets with versioning and advanced file management capabilities. Built with Elysia and integrated with S3 and Git LFS for robust dataset handling.
 
-Base URL: `https://api.blockchainml.com/v1`
+## Core Features
+
+- 🗄️ **Dataset Management**: Create, version, and manage datasets
+- 📦 **Large File Handling**: Support for files up to 5GB with chunked upload/download
+- 🔄 **Version Control**: Git LFS integration for dataset versioning
+- 🔐 **Access Control**: Private/public dataset management
+- 📊 **Progress Tracking**: Upload/download progress monitoring
+- 🚀 **Concurrent Operations**: Efficient batch file operations
 
 ## Authentication
 
-All API requests must be authenticated using an API key. Include the API key in the `Authorization` header of your requests:
-
+Use Bearer token authentication:
 ```
-Authorization: Bearer YOUR_API_KEY
+Authorization: Bearer <token>
 ```
-
-To obtain an API key, register for an account on the BlockchainML platform.
 
 ## API Endpoints
 
 ### Datasets
 
 #### List Datasets
-
 ```
 GET /api/v1/datasets
 ```
-
 Query Parameters:
-- `page` (optional): Page number for pagination (default: 1)
-- `limit` (optional): Number of items per page (default: 10)
-- `sortBy` (optional): Field to sort by ('title', 'createdAt', 'downloads')
-- `sortOrder` (optional): Sort order ('asc' or 'desc')
-- `tag` (optional): Filter by tag
-- `search` (optional): Search term for title or description
-
-Response:
-```json
-{
-  "datasets": [
-    {
-      "id": "dataset_id",
-      "title": "Dataset Title",
-      "description": "Dataset Description",
-      "tags": ["tag1", "tag2"],
-      "downloads": 100,
-      "createdAt": "2023-01-01T00:00:00Z"
-    }
-  ],
-  "meta": {
-    "total": 50,
-    "page": 1,
-    "limit": 10,
-    "totalPages": 5
-  }
-}
-```
-
-#### Get Dataset
-
-```
-GET /api/v1/datasets/:id
-```
-
-Response:
-```json
-{
-  "id": "dataset_id",
-  "title": "Dataset Title",
-  "description": "Dataset Description",
-  "tags": ["tag1", "tag2"],
-  "downloads": 100,
-  "createdAt": "2023-01-01T00:00:00Z",
-  "fileUrl": "https://storage.blockchainml.com/datasets/dataset_id.csv"
-}
-```
+- `page` (optional): Page number (default: 1)
+- `limit` (optional): Items per page (default: 10)
+- `sortBy`: Sort field ('title', 'createdAt', 'downloads')
+- `sortOrder`: 'asc' or 'desc'
+- `tag`: Filter by tag
+- `search`: Search in title/description
 
 #### Create Dataset
-
 ```
 POST /api/v1/datasets
 ```
-
-Request Body:
 ```json
 {
-  "title": "New Dataset",
-  "description": "Description of the new dataset",
-  "tags": ["tag1", "tag2"]
-}
-```
-
-Response:
-```json
-{
-  "id": "new_dataset_id",
-  "title": "New Dataset",
-  "description": "Description of the new dataset",
+  "title": "Dataset Name",
+  "description": "Description",
   "tags": ["tag1", "tag2"],
-  "downloads": 0,
-  "createdAt": "2023-06-15T00:00:00Z",
-  "uploadUrl": "https://storage.blockchainml.com/upload/new_dataset_id"
+  "isPrivate": false
 }
 ```
 
-#### Download Dataset
-
+#### Upload Files
 ```
-GET /api/v1/datasets/:id/download
+POST /api/v1/datasets/upload-urls
 ```
-
-Response:
 ```json
 {
-  "downloadUrl": "https://storage.blockchainml.com/download/dataset_id.csv"
+  "datasetName": "dataset-id",
+  "files": [
+    { "name": "file.csv", "size": 1024 }
+  ]
 }
 ```
 
-### Users
-
-#### Register User
-
+#### Complete Upload
 ```
-POST /api/v1/users/register
+POST /api/v1/datasets/:id/complete
 ```
-
-Request Body:
 ```json
 {
-  "email": "user@example.com",
-  "password": "securepassword",
-  "name": "John Doe"
-}
-```
-
-Response:
-```json
-{
-  "id": "user_id",
-  "email": "user@example.com",
-  "name": "John Doe",
-  "apiKey": "your_api_key_here"
-}
-```
-
-### Trending
-
-#### Get Trending Datasets
-
-```
-GET /api/v1/trending/datasets
-```
-
-Query Parameters:
-- `limit` (optional): Number of trending datasets to return (default: 10)
-
-Response:
-```json
-{
-  "datasets": [
+  "files": [
     {
-      "id": "dataset_id",
-      "title": "Trending Dataset",
-      "downloads": 1000,
-      "trendScore": 95.5
+      "name": "file.csv",
+      "storageKey": "key",
+      "size": 1024,
+      "contentType": "text/csv"
     }
   ]
 }
 ```
 
-## Error Handling
+#### Get Dataset
+```
+GET /api/v1/datasets/:id
+```
 
-The API uses conventional HTTP response codes to indicate the success or failure of requests. Codes in the 2xx range indicate success, codes in the 4xx range indicate an error that resulted from the provided information (e.g., missing required parameters, invalid values), and codes in the 5xx range indicate an error with our servers.
+#### Download Files
+```
+GET /api/v1/datasets/:id/download
+```
 
-Error Response Format:
+### Version Control
+
+#### Create Version
+```
+POST /api/v1/datasets/:id/versions
+```
 ```json
 {
-  "error": "Error message here"
+  "version": "1.0.0",
+  "changes": "Version notes",
+  "files": [...]
+}
+```
+
+#### Get Version
+```
+GET /api/v1/datasets/:id/versions/:version
+```
+
+## File Support
+
+### Supported File Types
+- Text: .csv, .json, .jsonl, .txt, .tsv
+- Audio: .mp3, .wav, .flac, .m4a
+- Image: .jpg, .jpeg, .png, .gif, .webp
+- Archive: .zip, .gz, .tar, .7z
+- Video: .mp4, .avi, .mov, .mkv
+- Binary: .bin, .parquet, .arrow
+
+### Size Limits
+- Maximum file size: 5GB
+- Maximum concurrent uploads: 5
+- Chunk size: 5MB
+
+## Error Handling
+
+Standard HTTP status codes with detailed error messages:
+```json
+{
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Detailed error message",
+    "details": {}
+  }
 }
 ```
 
 ## Rate Limiting
 
-The API implements rate limiting to prevent abuse. The current limit is 100 requests per minute per IP address. If you exceed this limit, you'll receive a 429 (Too Many Requests) response.
+- 100 requests per minute per IP
+- Headers:
+  - `X-RateLimit-Limit`
+  - `X-RateLimit-Remaining`
+  - `X-RateLimit-Reset`
 
-Rate limit headers are included in all responses:
+## Security Features
 
-- `X-RateLimit-Limit`: The maximum number of requests you're permitted to make per minute.
-- `X-RateLimit-Remaining`: The number of requests remaining in the current rate limit window.
-- `X-RateLimit-Reset`: The time at which the current rate limit window resets in UTC epoch seconds.
+- File validation and virus scanning
+- Checksum verification
+- Access control for private datasets
+- Secure URL signing
+- Input sanitization
 
-## OpenTelemetry Integration
+## Example Usage
 
-The API is instrumented with OpenTelemetry for observability. This allows for distributed tracing and performance monitoring. If you're integrating with our API and have OpenTelemetry set up in your system, you can correlate traces between your application and our API.
+```typescript
+// Upload dataset
+const dataset = await client.datasets.create({
+  title: "My Dataset",
+  description: "Description",
+  tags: ["blockchain", "ML"],
+  isPrivate: false
+});
 
-## Security Considerations
+// Upload files
+const { uploadUrls } = await client.datasets.getUploadUrls(dataset.id, files);
+await client.datasets.uploadFiles(uploadUrls);
 
-- Always use HTTPS for API requests to ensure data privacy.
-- Keep your API key secure and don't share it publicly.
-- Implement proper input validation and sanitization in your applications when sending data to the API.
-
-## Examples
-
-### Curl
-
-List datasets:
-```bash
-curl -H "Authorization: Bearer YOUR_API_KEY" https://api.blockchainml.com/v1/api/v1/datasets
+// Create version
+await client.datasets.createVersion(dataset.id, {
+  version: "1.0.0",
+  changes: "Initial release"
+});
 ```
 
-Create a dataset:
-```bash
-curl -X POST -H "Authorization: Bearer YOUR_API_KEY" -H "Content-Type: application/json" -d '{"title":"New Dataset","description":"A new dataset","tags":["blockchain","finance"]}' https://api.blockchainml.com/v1/api/v1/datasets
-```
+## Best Practices
 
-### Python (using requests library)
+1. Use chunked upload for large files
+2. Implement proper error handling
+3. Monitor upload/download progress
+4. Validate files before upload
+5. Use versioning for dataset changes
 
-```python
-import requests
+## Contributing
 
-API_KEY = 'YOUR_API_KEY'
-BASE_URL = 'https://api.blockchainml.com/v1'
+We welcome contributions! Please see our contributing guidelines for more details.
 
-headers = {
-    'Authorization': f'Bearer {API_KEY}'
-}
-
-# List datasets
-response = requests.get(f'{BASE_URL}/api/v1/datasets', headers=headers)
-datasets = response.json()
-
-# Get a specific dataset
-dataset_id = 'some_dataset_id'
-response = requests.get(f'{BASE_URL}/api/v1/datasets/{dataset_id}', headers=headers)
-dataset = response.json()
-
-# Create a new dataset
-new_dataset = {
-    'title': 'New Dataset',
-    'description': 'A new dataset',
-    'tags': ['blockchain', 'finance']
-}
-response = requests.post(f'{BASE_URL}/api/v1/datasets', headers=headers, json=new_dataset)
-created_dataset = response.json()
-```
-
-This documentation provides a comprehensive overview of your BlockchainML API, including authentication methods, available endpoints, error handling, rate limiting, and usage examples. You should customize this documentation based on the specific features and requirements of your API. Remember to keep it updated as you add new features or make changes to existing endpoints. 
 ---
-
 Made with ❤️ by the BlockchainML team
