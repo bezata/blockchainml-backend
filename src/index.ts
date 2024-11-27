@@ -5,19 +5,19 @@ import dotenv from "dotenv";
 import { opentelemetry } from "@elysiajs/opentelemetry";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
 import { PrismaClient } from "@prisma/client";
-import { datasetsRouter } from "./api/v1/datasets";
-import { trendingRouter } from "./api/v1/trending";
-import { usersRouter } from "./api/v1/users";
-import { authRouter } from "./api/v1/auth";
-import { userSettingsRouter } from "./api/v1/userSettings";
+import { datasetsRouter } from "./api/v1/datasets/datasets";
+import { trendingRouter } from "./api/v1/social/trending";
+import { usersRouter } from "./api/v1/users/users";
+import { authRouter } from "./api/v1//auth/auth";
+import { userSettingsRouter } from "./api/v1/users/userSettings";
 import { errorHandler, AppError } from "./utils/errorHandler";
 import { logger, loggerPlugin, maskSensitiveData } from "./utils/monitor";
-import { userProfileRouter } from "./api/v1/userProfile";
+import { userProfileRouter } from "./api/v1/users/userProfile";
 import { authPlugin } from "./middleware/authPlugin";
 import os from "os";
-import { publicOrganizationRouter } from "./api/v1/organization";
-import { organizationSettingsRouter } from "./api/v1/organizationSettings";
-import { userNotificationsRouter } from "./api/v1/notifications";
+import { publicOrganizationRouter } from "./api/v1/organization/organization";
+import { organizationSettingsRouter } from "./api/v1/organization/organizationSettings";
+import { userNotificationsRouter } from "./api/v1/users/notifications";
 
 dotenv.config();
 

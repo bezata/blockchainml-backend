@@ -2,8 +2,9 @@ import { Elysia, t } from "elysia";
 import { jwt } from "@elysiajs/jwt";
 import { PrismaClient, User } from "@prisma/client";
 import { logger } from "@/utils/monitor";
-import { AuthError } from "@/api/v1/auth";
+import { AuthError } from "@/api/v1/auth/auth";
 import { createPerformanceTracker } from "@/index";
+import { ServerWebSocket } from "bun";
 
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.NEXTAUTH_SECRET;

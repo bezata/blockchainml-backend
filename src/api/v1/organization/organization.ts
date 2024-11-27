@@ -1,8 +1,8 @@
 import { Elysia } from "elysia";
-import prisma from "../../middleware/prismaclient";
-import { logger } from "../../utils/monitor";
-import { enhancedRedactSensitiveInfo } from "../../utils/security";
-import { createPerformanceTracker } from "../../../src/index";
+import prisma from "../../../middleware/prismaclient";
+import { logger } from "../../../utils/monitor";
+import { enhancedRedactSensitiveInfo } from "../../../utils/security";
+import { createPerformanceTracker } from "../../../index";
 
 export const publicOrganizationRouter = new Elysia({ prefix: "/organization" })
   .get("/public/:id", async ({ params, store }) => {

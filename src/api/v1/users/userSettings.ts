@@ -1,18 +1,18 @@
 import { Elysia, Static, t } from "elysia";
-import { authPlugin, AuthError } from "../../middleware/authPlugin";
-import prisma from "../../middleware/prismaclient";
+import { authPlugin, AuthError } from "@/middleware/authPlugin";
+import prisma from "@/middleware/prismaclient";
 import { Prisma } from "@prisma/client";
-import { logger } from "../../utils/monitor";
+import { logger } from "@/utils/monitor";
 import crypto from "crypto";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
-import { UserSettingsSchema } from "../../types/userSettings/userSettingsSchema";
-import { userSettingsSchema } from "../../types/userSettings/userSettingsSchema";
+import { UserSettingsSchema } from "@/types/userSettings/userSettingsSchema";
+import { userSettingsSchema } from "@/types/userSettings/userSettingsSchema";
 import {
   sanitizeInput,
   enhancedRedactSensitiveInfo,
   validation,
   type SanitizationContext,
-} from "../../utils/security";
+} from "@/utils/security";
 
 const createPerformanceTracker = (label: string) => {
   const start = process.hrtime();

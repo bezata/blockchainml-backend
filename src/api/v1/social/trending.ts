@@ -1,5 +1,5 @@
 import { Elysia } from "elysia";
-import { TrendingService } from "../../services/trending";
+import { TrendingService } from "../../../services/trending";
 
 export const trendingRouter = new Elysia({ prefix: "/api/v1/trending" }).get(
   "/datasets",

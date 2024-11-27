@@ -9,9 +9,9 @@ import {
 import { jwt } from "@elysiajs/jwt";
 import { bearer } from "@elysiajs/bearer";
 import crypto from "crypto";
-import { logger, maskSensitiveData, loggerPlugin } from "../../utils/monitor";
-import authPlugin from "../../middleware/authPlugin";
-import { adjectives, nouns } from "../../const/const";
+import { logger, maskSensitiveData, loggerPlugin } from "@/utils/monitor";
+import authPlugin from "@/middleware/authPlugin";
+import { adjectives, nouns } from "@/const/const";
 
 logger.info("Starting auth.ts initialization");
 

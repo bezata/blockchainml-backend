@@ -1,8 +1,8 @@
 import { Elysia } from "elysia";
-import prisma from "../../middleware/prismaclient";
-import { logger } from "../../utils/monitor";
-import { authPlugin, AuthError } from "../../middleware/authPlugin";
-import { enhancedRedactSensitiveInfo } from "../../utils/security";
+import prisma from "@/middleware/prismaclient";
+import { logger } from "@/utils/monitor";
+import { authPlugin, AuthError } from "@/middleware/authPlugin";
+import { enhancedRedactSensitiveInfo } from "@/utils/security";
 import {
   UserPrivacySettings,
   NotificationPreferences,
