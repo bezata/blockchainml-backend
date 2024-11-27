@@ -5,6 +5,7 @@ import { logger } from "@/utils/monitor";
 import { AuthError } from "@/api/v1/auth/auth";
 import { createPerformanceTracker } from "@/index";
 import { ServerWebSocket } from "bun";
+import { WebSocketHandler } from "bun";
 
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.NEXTAUTH_SECRET;
@@ -94,7 +95,8 @@ const wsServer = new WebSocketServer();
 export default new Elysia()
   .use(jwt({ name: "jwt", secret: JWT_SECRET }))
   .ws("/ws", {
-    // Validate message schema
+    type: "json" as const,
+    data: {} as WebSocketData,
     body: t.Object({
       type: t.Union([
         t.Literal("new_post"),
@@ -116,11 +118,11 @@ export default new Elysia()
     perMessageDeflate: true, // Enable compression
 
     // Authenticate connection
-    beforeHandle: async ({ request, set }) => {
+    beforeHandle: async (context: { data: WebSocketData } & any) => {
       const perf = createPerformanceTracker("ws-auth");
 
       try {
-        const authHeader = request.headers.get("Authorization");
+        const authHeader = context.request.headers.get("Authorization");
         if (!authHeader?.startsWith("Bearer ")) {
           throw new AuthError(401, "Invalid authorization header");
         }
@@ -141,12 +143,7 @@ export default new Elysia()
           throw new AuthError(401, "User not found");
         }
 
-        const duration = perf.end();
-        logger.info("WebSocket connection authenticated", {
-          userId: user.id,
-          duration,
-        });
-
+        context.data = { user, topics: new Set<string>() };
         return { user };
       } catch (error) {
         const duration = perf.end();
@@ -166,19 +163,20 @@ export default new Elysia()
     },
 
     // Handle new connections
-    open(ws: ServerWebSocket<WebSocketData>) {
+    open(ws) {
       const perf = createPerformanceTracker("ws-open");
+      const bunWs = ws.raw as ServerWebSocket<WebSocketData>;
 
       try {
         // Subscribe to user-specific topics
-        const userTopic = `user:${ws.data.user.id}`;
-        ws.subscribe(userTopic);
-        ws.data.topics = new Set([userTopic]);
+        const userTopic = `user:${bunWs.data.user.id}`;
+        bunWs.subscribe(userTopic);
+        bunWs.data.topics = new Set([userTopic]);
 
         const duration = perf.end();
         logger.info("WebSocket connection opened", {
-          userId: ws.data.user.id,
-          topics: Array.from(ws.data.topics),
+          userId: bunWs.data.user.id,
+          topics: Array.from(bunWs.data.topics),
           duration,
         });
       } catch (error) {
@@ -192,15 +190,16 @@ export default new Elysia()
                   stack: error.stack,
                 }
               : error,
-          userId: ws.data.user.id,
+          userId: bunWs.data.user.id,
           duration,
         });
       }
     },
 
     // Handle messages
-    message(ws: ServerWebSocket<WebSocketData>, message: WebSocketMessage) {
+    message(ws, message) {
       const perf = createPerformanceTracker("ws-message");
+      const bunWs = ws.raw as ServerWebSocket<WebSocketData>;
 
       try {
         if (message.topic) {
@@ -211,7 +210,7 @@ export default new Elysia()
 
         const duration = perf.end();
         logger.info("WebSocket message processed", {
-          userId: ws.data.user.id,
+          userId: bunWs.data.user.id,
           type: message.type,
           topic: message.topic,
           duration,
@@ -227,7 +226,7 @@ export default new Elysia()
                   stack: error.stack,
                 }
               : error,
-          userId: ws.data.user.id,
+          userId: bunWs.data.user.id,
           messageType: message.type,
           duration,
         });
@@ -235,18 +234,19 @@ export default new Elysia()
     },
 
     // Handle disconnections
-    close(ws: ServerWebSocket<WebSocketData>) {
+    close(ws) {
       const perf = createPerformanceTracker("ws-close");
+      const bunWs = ws.raw as ServerWebSocket<WebSocketData>;
 
       try {
         // Unsubscribe from all topics
-        ws.data.topics.forEach((topic) => {
-          ws.unsubscribe(topic);
+        bunWs.data.topics.forEach((topic) => {
+          bunWs.unsubscribe(topic);
         });
 
         const duration = perf.end();
         logger.info("WebSocket connection closed", {
-          userId: ws.data.user.id,
+          userId: bunWs.data.user.id,
           duration,
         });
       } catch (error) {
@@ -260,7 +260,7 @@ export default new Elysia()
                   stack: error.stack,
                 }
               : error,
-          userId: ws.data.user.id,
+          userId: bunWs.data.user.id,
           duration,
         });
       }

@@ -574,6 +574,8 @@ model Dataset {
   isPublic    Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  isPrivate   Boolean  @default(false)
+  files     File[]
 
   user              User?   @relation(fields: [userWalletAddress], references: [walletAddress])
   userWalletAddress String?
@@ -799,4 +801,16 @@ model ContentPreference {
 enum ProfileVisibility {
   PUBLIC
   PRIVATE
+}
+
+model File {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  storageKey  String
+  size        Int
+  contentType String
+  dataset     Dataset  @relation(fields: [datasetId], references: [id])
+  datasetId   String   @db.ObjectId
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

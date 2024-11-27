@@ -1,11 +1,11 @@
 import { Elysia, t } from "elysia";
-import { UserService } from "../../services/userService";
+import { UserService } from "@/services/userService";
 
 export const usersRouter = new Elysia({ prefix: "/users" }).post(
   "/register",
   async ({ body }) => {
     const { email, name } = body;
-    const { user, apiKey } = await UserService.createUser(email, name);
+    const { user, apiKey } = await UserService.createUser(email, name, "user", "user", "user");
     return { user, apiKey };
   },
   {

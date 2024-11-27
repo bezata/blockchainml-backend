@@ -1,125 +1,253 @@
 import { Elysia, t } from "elysia";
-import { PrismaClient } from "@prisma/client";
-import { AppError } from "@/utils/errorHandler";
+import { authPlugin } from "@/middleware/authPlugin";
+import { s3DatasetService } from "@/services/s3DatasetService";
 import { logger } from "@/utils/monitor";
+import prisma from "@/middleware/prismaclient";
 
-const prisma = new PrismaClient();
-
-// Helper functions
-const handleError = (message: string, error: any, statusCode: number = 500) => {
-  logger.error(message, error);
-  throw error instanceof AppError ? error : new AppError(message, statusCode);
-};
-
-const getPaginationParams = (query: any) => ({
-  page: parseInt(query.page || "1"),
-  limit: parseInt(query.limit || "10"),
-  sortBy: query.sortBy || "createdAt",
-  sortOrder: query.sortOrder || "desc",
-});
-
-// Route handlers
-const getDatasetsHandler = async ({ query }: { query: any }) => {
-  const { page, limit, sortBy, sortOrder } = getPaginationParams(query);
-  const skip = (page - 1) * limit;
-
-  try {
-    const [datasets, total] = await Promise.all([
-      prisma.dataset.findMany({
-        skip,
-        take: limit,
-        orderBy: { [sortBy]: sortOrder },
-      }),
-      prisma.dataset.count(),
-    ]);
-
-    return {
-      datasets,
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
-  } catch (error) {
-    handleError("Failed to fetch datasets", error);
-  }
-};
-
-const getDatasetHandler = async ({ params }: { params: { id: string } }) => {
-  try {
-    const dataset = await prisma.dataset.findUnique({
-      where: { id: params.id },
-    });
-    if (!dataset) throw new AppError("Dataset not found", 404);
-    return dataset;
-  } catch (error) {
-    handleError(`Error fetching dataset ${params.id}`, error);
-  }
-};
-
-const createDatasetHandler = async ({ body }: { body: any }) => {
-  try {
-    const dataset = await prisma.dataset.create({
-      data: body,
-    });
-    logger.info(`Created dataset: ${dataset.id}`);
-    return dataset;
-  } catch (error) {
-    handleError("Failed to create dataset", error);
-  }
-};
-
-const updateDatasetHandler = async ({
-  params,
-  body,
-}: {
-  params: { id: string };
-  body: any;
-}) => {
-  try {
-    const updatedDataset = await prisma.dataset.update({
-      where: { id: params.id },
-      data: body,
-    });
-    logger.info(`Updated dataset ${params.id}`);
-    return updatedDataset;
-  } catch (error) {
-    handleError(`Failed to update dataset ${params.id}`, error);
-  }
-};
-
-const deleteDatasetHandler = async ({ params }: { params: { id: string } }) => {
-  try {
-    await prisma.dataset.delete({ where: { id: params.id } });
-    logger.info(`Deleted dataset: ${params.id}`);
-    return { message: "Dataset deleted successfully" };
-  } catch (error) {
-    handleError(`Failed to delete dataset ${params.id}`, error);
-  }
-};
-
-// Router definition
 export const datasetsRouter = new Elysia({ prefix: "/datasets" })
-  .get("/", getDatasetsHandler)
-  .get("/:id", getDatasetHandler)
-  .post("/", createDatasetHandler, {
-    body: t.Object({
-      title: t.String(),
-      description: t.Optional(t.String()),
-      tags: t.Array(t.String()),
-      isPublic: t.Boolean(),
-    }),
+  .use(authPlugin)
+
+  // Get dataset list
+  .get("/", async ({ query }) => {
+    try {
+      const page = Number(query.page) || 1;
+      const limit = Number(query.limit) || 10;
+
+      const datasets = await prisma.dataset.findMany({
+        take: limit,
+        skip: (page - 1) * limit,
+        include: {
+          user: {
+            select: {
+              name: true,
+              walletAddress: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
+
+      const total = await prisma.dataset.count();
+
+      return {
+        datasets,
+        pagination: {
+          total,
+          page,
+          pages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error) {
+      logger.error("Error fetching datasets:", error);
+      throw error;
+    }
   })
-  .patch("/:id", updateDatasetHandler, {
-    body: t.Object({
-      title: t.Optional(t.String()),
-      description: t.Optional(t.String()),
-      tags: t.Optional(t.Array(t.String())),
-      isPublic: t.Optional(t.Boolean()),
-    }),
+
+  // Create new dataset
+  .post(
+    "/",
+    async ({ body, authenticatedUser }) => {
+      try {
+        const dataset = await prisma.dataset.create({
+          data: {
+            title: body.title,
+            description: body.description,
+            isPrivate: body.isPrivate,
+            tags: body.tags,
+            userWalletAddress: authenticatedUser.walletAddress,
+          },
+        });
+
+        return dataset;
+      } catch (error) {
+        logger.error("Error creating dataset:", error);
+        throw error;
+      }
+    },
+    {
+      body: t.Object({
+        title: t.String(),
+        description: t.Optional(t.String()),
+        isPrivate: t.Boolean(),
+        tags: t.Array(t.String()),
+      }),
+    }
+  )
+
+  // Get upload URLs for files
+  .post(
+    "/upload-urls",
+    async ({ body, authenticatedUser }) => {
+      try {
+        const uploadUrls = await Promise.all(
+          body.files.map(async (file: any) => {
+            const { uploadUrl, storageKey } =
+              await s3DatasetService.getUploadUrl(
+                authenticatedUser.id,
+                body.datasetName,
+                file.name,
+                body.isPrivate
+              );
+
+            return {
+              fileName: file.name,
+              uploadUrl,
+              storageKey,
+            };
+          })
+        );
+
+        return { uploadUrls };
+      } catch (error) {
+        logger.error("Error generating upload URLs:", error);
+        throw error;
+      }
+    },
+    {
+      body: t.Object({
+        datasetName: t.String(),
+        files: t.Array(
+          t.Object({
+            name: t.String(),
+          })
+        ),
+        isPrivate: t.Optional(t.Boolean()),
+      }),
+    }
+  )
+
+  // Complete dataset upload
+  .post(
+    "/:id/complete",
+    async ({ params, body, authenticatedUser }) => {
+      try {
+        const dataset = await prisma.dataset.update({
+          where: { id: params.id },
+          data: {
+            files: {
+              createMany: {
+                data: body.files.map((file: any) => ({
+                  name: file.name,
+                  storageKey: file.storageKey,
+                  size: file.size,
+                  contentType: file.contentType,
+                })),
+              },
+            },
+          },
+        });
+
+        return dataset;
+      } catch (error) {
+        logger.error("Error completing dataset upload:", error);
+        throw error;
+      }
+    },
+    {
+      body: t.Object({
+        files: t.Array(
+          t.Object({
+            name: t.String(),
+            storageKey: t.String(),
+            size: t.Number(),
+            contentType: t.String(),
+          })
+        ),
+      }),
+    }
+  )
+
+  // Get dataset details
+  .get("/:id", async ({ params, authenticatedUser }) => {
+    try {
+      const dataset = await prisma.dataset.findUnique({
+        where: { id: params.id },
+        include: {
+          files: true,
+          user: {
+            select: {
+              name: true,
+              walletAddress: true,
+            },
+          },
+        },
+      });
+
+      if (!dataset) {
+        throw new Error("Dataset not found");
+      }
+
+      return dataset;
+    } catch (error) {
+      logger.error("Error fetching dataset:", error);
+      throw error;
+    }
   })
-  .delete("/:id", deleteDatasetHandler);
+
+  // Get download URLs for dataset files
+  .get("/:id/download", async ({ params, authenticatedUser }) => {
+    try {
+      const dataset = await prisma.dataset.findUnique({
+        where: { id: params.id },
+        include: { files: true },
+      });
+
+      if (!dataset) {
+        throw new Error("Dataset not found");
+      }
+
+      const downloadUrls = await Promise.all(
+        dataset.files.map(async (file) => ({
+          fileName: file.name,
+          downloadUrl: await s3DatasetService.getDownloadUrl(file.storageKey),
+        }))
+      );
+
+      return { downloadUrls };
+    } catch (error) {
+      logger.error("Error generating download URLs:", error);
+      throw error;
+    }
+  })
+
+  // Search datasets
+  .get("/search", async ({ query }) => {
+    try {
+      const search = query.q as string;
+      const type = query.type as string;
+      const page = Number(query.page) || 1;
+      const limit = Number(query.limit) || 10;
+
+      const datasets = await prisma.dataset.findMany({
+        where: {
+          OR: [
+            { title: { contains: search, mode: "insensitive" } },
+            { description: { contains: search, mode: "insensitive" } },
+            { tags: { hasSome: [search] } },
+          ],
+          ...(type && {
+            files: { some: { contentType: { startsWith: type } } },
+          }),
+        },
+        include: {
+          user: {
+            select: {
+              name: true,
+              walletAddress: true,
+            },
+          },
+        },
+        take: limit,
+        skip: (page - 1) * limit,
+      });
+
+      return datasets;
+    } catch (error) {
+      logger.error("Error searching datasets:", error);
+      throw error;
+    }
+  });
 
 export default datasetsRouter;

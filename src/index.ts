@@ -18,6 +18,7 @@ import os from "os";
 import { publicOrganizationRouter } from "./api/v1/organization/organization";
 import { organizationSettingsRouter } from "./api/v1/organization/organizationSettings";
 import { userNotificationsRouter } from "./api/v1/users/notifications";
+import messagingRouter from "./api/v1/messaging/conversations";
 
 dotenv.config();
 
@@ -174,19 +175,14 @@ async function startServer() {
         .group("/user-settings", (app) =>
           app.use(authPlugin).use(userSettingsRouter)
         )
-        .group("/organizations", (app) =>
-          app.use(authPlugin).use(publicOrganizationRouter)
-        )
-        .group("/organization-settings", (app) =>
-          app.use(authPlugin).use(organizationSettingsRouter)
-        )
-        .group("/notifications", (app) =>
-          app.use(authPlugin).use(userNotificationsRouter)
-        )
         .group("", (app) => app.use(authPlugin).use(userProfileRouter))
         .use(usersRouter)
         .use(datasetsRouter)
         .use(trendingRouter)
+        .use(publicOrganizationRouter)
+        .use(organizationSettingsRouter)
+        .use(userNotificationsRouter)
+        .use(messagingRouter)
     )
     .onError(({ code, error, request, store }) => {
       const errorLogger = (store as any)?.requestLogger || logger;
