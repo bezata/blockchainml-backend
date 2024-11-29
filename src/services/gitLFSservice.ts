@@ -3,6 +3,13 @@ import { promisify } from "util";
 import { logger } from "../utils/monitor";
 import fs from "fs/promises";
 import path from "path";
+import { FileInfo } from "@/types/dataset/dataset";
+
+interface GitOperationError extends Error {
+  command?: string;
+  stderr?: string;
+  code?: number;
+}
 
 interface VersionMetadata {
   version: string;
@@ -30,6 +37,21 @@ export class GitLFSDatasetService {
 
   constructor() {
     this.baseDir = process.env.DATASETS_GIT_PATH || "/data/datasets";
+  }
+
+  private async executeGitCommand(command: string, errorContext: string): Promise<{stdout: string}> {
+    try {
+      return await execAsync(command);
+    } catch (error) {
+      const gitError = error as GitOperationError;
+      logger.error(`Git operation failed: ${errorContext}`, {
+        error: gitError.message,
+        command: gitError.command,
+        stderr: gitError.stderr,
+        code: gitError.code
+      });
+      throw new Error(`Git operation failed: ${errorContext} - ${gitError.message}`);
+    }
   }
 
   async initializeDatasetRepo(
@@ -77,6 +99,10 @@ export class GitLFSDatasetService {
       });
       throw error;
     }
+  }
+
+  getRepoPath(userId: string, datasetName: string): string {
+    return path.join(this.baseDir, userId, datasetName);
   }
 
   private async createDatasetStructure(
@@ -181,14 +207,13 @@ export class GitLFSDatasetService {
         JSON.stringify(versionMetadata, null, 2)
       );
 
-      // Create version tag
-      await execAsync(`
+      await this.executeGitCommand(`
         cd ${repoPath} &&
         git add . &&
         git commit -m "Version ${version}" &&
         git tag -a v${version} -m "${changes}"
-      `);
-
+      `, "Creating version");
+  
       logger.info("Created dataset version", {
         userId,
         datasetName,
@@ -203,10 +228,6 @@ export class GitLFSDatasetService {
       });
       throw error;
     }
-  }
-
-  private getRepoPath(userId: string, datasetName: string): string {
-    return path.join(this.baseDir, userId, datasetName);
   }
 
   private generateReadme(metadata: DatasetMetadata): string {
@@ -295,6 +316,133 @@ metadata/**/* filter=lfs diff=lfs merge=lfs -text
     ]);
   }
 
+  async getFileList(
+    userId: string, 
+    datasetName: string, 
+    version: string
+  ): Promise<FileInfo[]> { 
+    try {
+      const repoPath = this.getRepoPath(userId, datasetName);
+      const { stdout } = await execAsync(`
+        cd ${repoPath} &&
+        git ls-tree -r --name-only ${version}
+      `);
+  
+      const files = stdout.trim().split('\n').filter(Boolean);
+      
+      // Get detailed file info for each file
+      return Promise.all(
+        files.map(async (filename) => {
+          const { stdout: fileData } = await execAsync(`
+            cd ${repoPath} &&
+            git show ${version}:${filename}
+          `);
+  
+          const { stdout: checksum } = await execAsync(`
+            cd ${repoPath} &&
+            git rev-parse ${version}:${filename}
+          `);
+  
+          return {
+            name: filename,
+            size: fileData.length,
+            contentType: this.getFileContentType(filename),
+            storageKey: `${datasetName}/${filename}`,
+            checksum: checksum.trim()
+          };
+        })
+      );
+    } catch (error) {
+      logger.error('Error getting file list:', { error, userId, datasetName, version });
+      throw new Error(`Failed to get file list: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+  async validateChecksum(
+    userId: string, 
+    version: string, 
+    fileName: string
+  ): Promise<boolean> {
+    try {
+      const repoPath = this.getRepoPath(userId, fileName);
+      const { stdout: storedChecksum } = await execAsync(`
+        cd ${repoPath} &&
+        git rev-parse ${version}:${fileName}
+      `);
+  
+      const { stdout: currentChecksum } = await execAsync(`
+        cd ${repoPath} &&
+        git hash-object ${fileName}
+      `);
+  
+      return storedChecksum.trim() === currentChecksum.trim();
+    } catch (error) {
+      logger.error('Error validating checksum:', { error, userId, version, fileName });
+      return false;
+    }
+  }
+  
+  async forkRepository(
+    userId: string,
+    sourceDatasetId: string,
+    targetDatasetId: string,
+    version: string
+  ): Promise<void> {
+    try {
+      const sourcePath = this.getRepoPath(userId, sourceDatasetId);
+      const targetPath = this.getRepoPath(userId, targetDatasetId);
+  
+      // Create target directory
+      await fs.mkdir(targetPath, { recursive: true });
+  
+      // Clone and checkout specific version
+      await execAsync(`
+        cd ${targetPath} &&
+        git clone ${sourcePath} . &&
+        git checkout ${version} &&
+        git lfs fetch --all &&
+        git lfs checkout
+      `);
+  
+      // Update remote to point to new repository
+      await execAsync(`
+        cd ${targetPath} &&
+        git remote remove origin &&
+        git remote add origin ${targetPath}
+      `);
+  
+      logger.info('Repository forked successfully', {
+        userId,
+        sourceDatasetId,
+        targetDatasetId,
+        version
+      });
+    } catch (error) {
+      logger.error('Error forking repository:', {
+        error,
+        userId,
+        sourceDatasetId,
+        targetDatasetId,
+        version
+      });
+      throw error;
+    }
+  }
+  
+  private getFileContentType(filename: string): string {
+    const ext = path.extname(filename).toLowerCase();
+    const contentTypes: Record<string, string> = {
+      '.parquet': 'application/parquet',
+      '.arrow': 'application/arrow',
+      '.bin': 'application/octet-stream',
+      '.zip': 'application/zip',
+      '.gz': 'application/gzip',
+      '.json': 'application/json',
+      '.md': 'text/markdown',
+      '.csv': 'text/csv',
+      '.txt': 'text/plain'
+    };
+    return contentTypes[ext] || 'application/octet-stream';
+  }
   async getVersionMetadata(
     userWalletAddress: string,
     datasetId: string,
