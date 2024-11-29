@@ -250,6 +250,4 @@ await client.datasets.createVersion(dataset.id, {
 
 We welcome contributions! Please see our contributing guidelines for more details.
 
-## This documentation provides a comprehensive overview of your BlockchainML API, including authentication methods, available endpoints, error handling, rate limiting, and usage examples. You should customize this documentation based on the specific features and requirements of your API. Remember to keep it updated as you add new features or make changes to existing endpoints.
-
 Made with ❤️ by the BlockchainML team
