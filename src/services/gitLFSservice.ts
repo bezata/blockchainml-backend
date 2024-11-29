@@ -11,6 +11,7 @@ interface GitOperationError extends Error {
   code?: number;
 }
 
+
 interface VersionMetadata {
   version: string;
   changes: string;
@@ -39,18 +40,23 @@ export class GitLFSDatasetService {
     this.baseDir = process.env.DATASETS_GIT_PATH || "/data/datasets";
   }
 
-  private async executeGitCommand(command: string, errorContext: string): Promise<{stdout: string}> {
+  private async executeGitCommand(
+    command: string, 
+    errorContext: string
+  ): Promise<{stdout: string}> {
     try {
       return await execAsync(command);
     } catch (error) {
       const gitError = error as GitOperationError;
       logger.error(`Git operation failed: ${errorContext}`, {
-        error: gitError.message,
         command: gitError.command,
         stderr: gitError.stderr,
         code: gitError.code
       });
-      throw new Error(`Git operation failed: ${errorContext} - ${gitError.message}`);
+      throw new Error(
+        `Git operation failed: ${errorContext}`,
+        gitError
+      );
     }
   }
 

@@ -31,6 +31,13 @@ class DatasetVersionError extends Error {
   }
 }
 
+interface GitOperationError extends Error {
+  command?: string;
+  stderr?: string;
+  code?: number;
+}
+
+
 const VERSION_ERRORS = {
   INVALID_VERSION: 'INVALID_VERSION',
   PERMISSION_DENIED: 'PERMISSION_DENIED',
@@ -592,6 +599,8 @@ export class DatasetVersioningService {
     ): Promise<VersionDiff> {
       const v1Files = await this.gitLFS.getFileList(userWalletAddress, datasetId, version1);
       const v2Files = await this.gitLFS.getFileList(userWalletAddress, datasetId, version2);
+      const v1Metadata = await this.gitLFS.getVersionMetadata(userWalletAddress, datasetId, version1);
+      const v2Metadata = await this.gitLFS.getVersionMetadata(userWalletAddress, datasetId, version2);
       
       const added: FileInfo[] = [];
       const modified: FileInfo[] = [];
@@ -617,7 +626,32 @@ export class DatasetVersioningService {
         }
       }
 
-      return { added, removed, modified, unchanged };
+      return {
+        added,
+        modified,
+        removed,
+        unchanged,
+        fileChanges: {
+          added: added.map(f => f.name),
+          modified: modified.map(f => ({
+            name: f.name,
+            sizeDiff: f.size - (v1Files.find(file => file.name === f.name)?.size || 0),
+            contentChanges: 'Binary file differences'
+          })),
+          removed: removed.map(f => f.name)
+        },
+        metadataChanges: this.compareMetadata(v1Metadata.metadata, v2Metadata.metadata),
+        statistics: {
+          totalChangedFiles: added.length + modified.length + removed.length,
+          sizeImpact: this.calculateSizeImpact(added, removed, modified),
+          changeTypes: {
+            additions: added.length,
+            modifications: modified.length,
+            deletions: removed.length
+          }
+        }
+      };
+    
     }
     async rollbackVersion(
       userWalletAddress: string,
@@ -699,7 +733,40 @@ export class DatasetVersioningService {
         return forkedDataset;
       });
     }
-  
+    private compareMetadata(
+      oldMetadata?: Record<string, any>,
+      newMetadata?: Record<string, any>
+    ): Record<string, { old: any; new: any }> {
+      const changes: Record<string, { old: any; new: any }> = {};
+      const allKeys = new Set([
+        ...Object.keys(oldMetadata || {}),
+        ...Object.keys(newMetadata || {})
+      ]);
+    
+      for (const key of allKeys) {
+        if (oldMetadata?.[key] !== newMetadata?.[key]) {
+          changes[key] = {
+            old: oldMetadata?.[key],
+            new: newMetadata?.[key]
+          };
+        }
+      }
+    
+      return changes;
+    }
+    
+    private calculateSizeImpact(
+      added: FileInfo[],
+      removed: FileInfo[],
+      modified: FileInfo[]
+    ): number {
+      return (
+        added.reduce((sum, file) => sum + file.size, 0) -
+        removed.reduce((sum, file) => sum + file.size, 0) +
+        modified.reduce((sum, file) => sum + file.size, 0)
+      );
+    }
+    
     private async withTransaction<T>(
       operation: (prisma: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>) => Promise<T>
     ): Promise<T> {

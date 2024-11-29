@@ -4,6 +4,7 @@ import { s3DatasetService } from "@/services/s3DatasetService";
 import { logger } from "@/utils/monitor";
 import prisma from "@/middleware/prismaclient";
 import { Prisma } from "@prisma/client";
+import DatasetVersioningService from "@/services/datasetVersioningService";
 
 interface AuthenticatedUser {
   id: string;
@@ -35,6 +36,24 @@ interface CompleteUploadBody {
     contentType: string;
   }>;
 }
+
+
+const createVersionSchema = t.Object({
+  version: t.String(),
+  changes: t.String(),
+  files: t.Array(t.Object({
+    name: t.String(),
+    size: t.Number(),
+    contentType: t.String()
+  }))
+});
+
+const versionTagSchema = t.Object({
+  name: t.String(),
+  description: t.String(),
+  createdBy: t.String()
+});
+
 
 class DatasetError extends Error {
   constructor(public statusCode: number, message: string) {
@@ -110,7 +129,10 @@ export const datasetsRouter = new Elysia({ prefix: "/datasets" })
       throw error;
     }
   })
-
+  .get("/:id/versions", async ({ params, authenticatedUser }) => {
+    const service = new DatasetVersioningService(); 
+    return await service.getVersionTree(params.id);
+  })
   .post(
     "/",
     async ({
@@ -143,7 +165,16 @@ export const datasetsRouter = new Elysia({ prefix: "/datasets" })
       });
     }
   )
-
+  .post("/:id/versions", async ({ params, body, authenticatedUser }) => {
+    const service = new DatasetVersioningService();
+    return await service.createVersion(
+      authenticatedUser.walletAddress,
+      params.id,
+      body
+    );
+  }, {
+    body: createVersionSchema
+  })
   .post(
     "/upload-urls",
     async ({
@@ -202,7 +233,58 @@ export const datasetsRouter = new Elysia({ prefix: "/datasets" })
       }),
     }
   )
+  .post("/:id/versions/:version/tags", async ({ params, body, authenticatedUser }) => {
+    const service = new DatasetVersioningService();
+    return await service.tagVersion(
+      params.id,
+      params.version,
+      {
+        ...body,
+        createdBy: authenticatedUser.walletAddress
+      }
+    );
+  }, {
+    body: versionTagSchema
+  })
+  
+  .post("/:id/versions/:version/rollback", async ({ params, authenticatedUser }) => {
+    const service = new DatasetVersioningService();
+    return await service.rollbackVersion(
+      authenticatedUser.walletAddress,
+      params.id,
+      params.version
+    );
+  })
+  .post("/:id/fork", async ({ params, body, authenticatedUser }) => {
+    const service = new DatasetVersioningService();
+    return await service.forkDataset(
+      authenticatedUser.walletAddress,
+      params.id,
+      body.version
+    );
+  }, {
+    body: t.Object({
+      version: t.String()
+    })
+  })
 
+  // Validate version
+  .post("/:id/versions/:version/validate", async ({ params, body, authenticatedUser }) => {
+    const service = new DatasetVersioningService();
+    return await service.validateVersion(
+      params.id,
+      params.version,
+      body.options
+    );
+  }, {
+    body: t.Object({
+      options: t.Optional(t.Object({
+        checksums: t.Optional(t.Boolean()),
+        metadata: t.Optional(t.Boolean()),
+        contentValidation: t.Optional(t.Boolean())
+      }))
+    })
+  })
   .post(
     "/:id/complete",
     async ({
@@ -276,7 +358,26 @@ export const datasetsRouter = new Elysia({ prefix: "/datasets" })
       throw error;
     }
   })
-
+  .get("/:id/versions/diff", async ({ params, query, authenticatedUser }) => {
+    if (!query.version1 || !query.version2) {
+      throw new DatasetError(400, "Both version1 and version2 are required");
+    }
+    
+    const service = new DatasetVersioningService();
+    return await service.getDiff(
+      params.id,
+      query.version1 as string,
+      query.version2 as string
+    );
+  })
+  .get("/:id/versions/:version", async ({ params, authenticatedUser }) => {
+    const service = new DatasetVersioningService();
+    return await service.getVersionMetadata(
+      authenticatedUser.walletAddress,
+      params.id,
+      params.version
+    );
+  })
   .get("/:id/download", async ({ params, authenticatedUser }) => {
     try {
       const dataset = await prisma.dataset.findUnique({
@@ -389,5 +490,7 @@ export const datasetsRouter = new Elysia({ prefix: "/datasets" })
       body: updateDatasetSchema,
     }
   );
+
+  
 
 export default datasetsRouter;
