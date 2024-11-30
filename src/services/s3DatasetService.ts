@@ -65,12 +65,12 @@ export class S3DatasetService {
     TEXT: {
       extensions: [".csv", ".json", ".jsonl", ".txt", ".tsv"],
       folder: "text",
-      tracked: false, // Not tracked by Git LFS by default if < 10MB
+      tracked: false, 
     },
     AUDIO: {
       extensions: [".mp3", ".wav", ".flac", ".m4a"],
       folder: "audio",
-      tracked: true, // Always tracked by Git LFS
+      tracked: true, 
     },
     IMAGE: {
       extensions: [".jpg", ".jpeg", ".png", ".gif", ".webp"],
