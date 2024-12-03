@@ -282,7 +282,6 @@ async function createOrUpdateUser(
 
 export const authRouter = new Elysia({ prefix: "/auth" })
   .use(loggerPlugin)
-  .use(rateLimit())
   .use(
     jwt({
       name: "jwt",

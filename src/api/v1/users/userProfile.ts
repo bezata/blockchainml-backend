@@ -49,20 +49,37 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
     const perf = createPerformanceTracker("get-own-profile");
     const requestLogger = (store as any)?.requestLogger || logger;
 
+    requestLogger.info("User profile GET request received", {
+      endpoint: "/user/profile",
+      requestTime: new Date().toISOString(),
+    });
+
     if (!authenticatedUser) {
       const duration = perf.end();
-      requestLogger.error("User profile GET - No authenticated user", {
+      requestLogger.error("User profile GET - Authentication failed", {
         duration,
+        error: "No authenticated user",
+        endpoint: "/user/profile",
       });
       throw new AuthError(401, "Authentication required");
     }
 
     try {
       const walletAddress = authenticatedUser.walletAddress;
+      requestLogger.info("Fetching user profile", {
+        walletAddress: enhancedRedactSensitiveInfo(walletAddress),
+        endpoint: "/user/profile",
+      });
 
       // Check cache first
       const cached = profileCache.get(walletAddress);
       if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        const duration = perf.end();
+        requestLogger.info("User profile GET - Cache hit", {
+          duration,
+          walletAddress: enhancedRedactSensitiveInfo(walletAddress),
+          endpoint: "/user/profile",
+        });
         return cached.data;
       }
 
@@ -78,6 +95,7 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
         select: {
           walletAddress: true,
           name: true,
+          username: true,
           email: true,
           bio: true,
           avatar: true,
@@ -115,6 +133,7 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
             { preserveWalletAddress: true }
           ).address,
           duration,
+          endpoint: "/user/profile",
         });
         throw new AuthError(404, "User profile not found");
       }
@@ -131,28 +150,21 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
       });
 
       const duration = perf.end();
-      requestLogger.info("Profile retrieved successfully", {
-        userAddress: enhancedRedactSensitiveInfo(
-          { address: walletAddress },
-          { preserveWalletAddress: true }
-        ).address,
+      requestLogger.info("User profile GET - Success", {
         duration,
-        fields: Object.keys(userProfile),
+        walletAddress: enhancedRedactSensitiveInfo(walletAddress),
+        found: !!userProfile,
+        endpoint: "/user/profile",
       });
 
       return redactedProfile;
     } catch (error) {
       const duration = perf.end();
-      requestLogger.error("Error fetching user profile", {
-        error:
-          error instanceof Error
-            ? {
-                name: error.name,
-                message: error.message,
-                stack: error.stack,
-              }
-            : error,
+      requestLogger.error("User profile GET - Error", {
         duration,
+        error: error instanceof Error ? error.message : "Unknown error",
+        stack: error instanceof Error ? error.stack : undefined,
+        endpoint: "/user/profile",
       });
       if (error instanceof AuthError) throw error;
       throw new AuthError(500, "Failed to fetch user profile");
@@ -164,6 +176,11 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
     const perf = createPerformanceTracker("update-profile");
     const requestLogger = (store as any)?.requestLogger || logger;
 
+    requestLogger.info("User profile PATCH request received", {
+      endpoint: "/user/profile",
+      requestTime: new Date().toISOString(),
+    });
+
     if (!authenticatedUser) {
       throw new AuthError(401, "Authentication required");
     }
@@ -172,12 +189,18 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
       const sanitizedData = sanitizeProfileData(body);
       const walletAddress = authenticatedUser.walletAddress;
 
+      requestLogger.info("Updating user profile", {
+        walletAddress: enhancedRedactSensitiveInfo(walletAddress),
+        endpoint: "/user/profile",
+      });
+
       const updatedProfile = await prisma.user.update({
         where: { walletAddress },
         data: sanitizedData,
         select: {
           walletAddress: true,
           name: true,
+          username: true,
           email: true,
           bio: true,
           avatar: true,
@@ -197,13 +220,11 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
       profileCache.delete(walletAddress);
 
       const duration = perf.end();
-      requestLogger.info("Profile updated successfully", {
-        userAddress: enhancedRedactSensitiveInfo(
-          { address: walletAddress },
-          { preserveWalletAddress: true }
-        ).address,
+      requestLogger.info("User profile PATCH - Success", {
         duration,
+        walletAddress: enhancedRedactSensitiveInfo(walletAddress),
         updatedFields: Object.keys(sanitizedData),
+        endpoint: "/user/profile",
       });
 
       return enhancedRedactSensitiveInfo(updatedProfile, {
@@ -211,16 +232,11 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
       });
     } catch (error) {
       const duration = perf.end();
-      requestLogger.error("Error updating user profile", {
-        error:
-          error instanceof Error
-            ? {
-                name: error.name,
-                message: error.message,
-                stack: error.stack,
-              }
-            : error,
+      requestLogger.error("User profile PATCH - Error", {
         duration,
+        error: error instanceof Error ? error.message : "Unknown error",
+        stack: error instanceof Error ? error.stack : undefined,
+        endpoint: "/user/profile",
       });
       throw new AuthError(500, "Failed to update user profile");
     }
@@ -233,11 +249,22 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
       const perf = createPerformanceTracker("get-public-profile");
       const requestLogger = (store as any)?.requestLogger || logger;
 
+      requestLogger.info("User public profile GET request received", {
+        endpoint: "/user/profile/:walletAddress",
+        requestTime: new Date().toISOString(),
+      });
+
       try {
         // Check cache for public profile
         const cacheKey = `public_${params.walletAddress}`;
         const cached = profileCache.get(cacheKey);
         if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+          const duration = perf.end();
+          requestLogger.info("User public profile GET - Cache hit", {
+            duration,
+            walletAddress: enhancedRedactSensitiveInfo(params.walletAddress),
+            endpoint: "/user/profile/:walletAddress",
+          });
           return cached.data;
         }
 
@@ -252,6 +279,7 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
                 { preserveWalletAddress: true }
               ).address
             : "anonymous",
+          endpoint: "/user/profile/:walletAddress",
         });
 
         const profileUser = await prisma.user.findUnique({
@@ -259,6 +287,7 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
           select: {
             walletAddress: true,
             name: true,
+            username: true,
             email: true,
             bio: true,
             avatar: true,
@@ -344,28 +373,74 @@ export const userProfileRouter = new Elysia({ prefix: "/user" })
           timestamp: Date.now(),
         });
 
+        const duration = perf.end();
+        requestLogger.info("User public profile GET - Success", {
+          duration,
+          walletAddress: enhancedRedactSensitiveInfo(params.walletAddress),
+          found: !!profileUser,
+          endpoint: "/user/profile/:walletAddress",
+        });
+
         return redactedProfile;
       } catch (error) {
         const duration = perf.end();
-        requestLogger.error("Error fetching public profile", {
-          error:
-            error instanceof Error
-              ? {
-                  name: error.name,
-                  message: error.message,
-                  stack: error.stack,
-                }
-              : error,
-          targetAddress: enhancedRedactSensitiveInfo(
-            { address: params.walletAddress },
-            { preserveWalletAddress: true }
-          ).address,
+        requestLogger.error("User public profile GET - Error", {
           duration,
+          error: error instanceof Error ? error.message : "Unknown error",
+          stack: error instanceof Error ? error.stack : undefined,
+          endpoint: "/user/profile/:walletAddress",
         });
         if (error instanceof AuthError) throw error;
         throw new AuthError(500, "Failed to fetch user profile");
       }
     }
-  );
+  )
+
+  .get("/by-username/:username", async ({ params, store }) => {
+    const perf = createPerformanceTracker("get-user-by-username");
+    const requestLogger = (store as any)?.requestLogger || logger;
+
+    try {
+      const user = await prisma.user.findUnique({
+        where: { username: params.username },
+        select: {
+          walletAddress: true,
+          username: true,
+        },
+      });
+
+      if (!user) {
+        throw new AuthError(404, "User not found");
+      }
+
+      const duration = perf.end();
+      requestLogger.info("Username lookup successful", {
+        duration,
+        username: params.username,
+      });
+
+      return user;
+    } catch (error) {
+      const duration = perf.end();
+      requestLogger.error("Username lookup failed", {
+        duration,
+        username: params.username,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+      throw error;
+    }
+  })
+
+  .onError(({ error, set, request, store }) => {
+    const errorLogger = (store as any)?.requestLogger || logger;
+    errorLogger.error("User profile route error", {
+      error: error instanceof Error ? error.message : "Unknown error",
+      stack: error instanceof Error ? error.stack : undefined,
+   
+    });
+    set.status = 500;
+
+    return { error: "Internal Server Error" };
+  });
 
 export default userProfileRouter;
