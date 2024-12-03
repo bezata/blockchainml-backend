@@ -20,7 +20,7 @@
     "@elysiajs/swagger": "^1.1.6",
     "@elysiajs/websocket": "^0.2.8",
     "@opentelemetry/auto-instrumentations-node": "^0.50.2",
-    "@opentelemetry/sdk-node": "^0.53.0",
+    "@opentelemetry/sdk-node": "^0.54.0",
     "@prisma/client": "^5.22.0",
     "@reown/appkit-siwe": "^1.5.2",
     "dotenv": "^16.4.5",
