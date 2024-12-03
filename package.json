@@ -27,6 +27,7 @@
     "elysia": "^1.1.25",
     "elysia-rate-limit": "^4.1.0",
     "jsonwebtoken": "^9.0.2",
+    "mongodb": "^6.11.0",
     "prisma": "^5.22.0",
     "winston": "^3.17.0",
     "winston-daily-rotate-file": "^5.0.0",

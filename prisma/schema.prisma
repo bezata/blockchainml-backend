@@ -20,7 +20,7 @@ model User {
   chainId       String
   username      String  @unique // Public display name
   name          String? // Full/Display name
-  email         String? @unique // User email
+  email         String? // User email
   bio           String? // User biography
   avatar        String? // Profile picture
 
@@ -98,6 +98,7 @@ model User {
   @@index([status])
   @@index([createdAt])
   @@index([lastSeen])
+  @@index([email])
 }
 
 /// Organization model
@@ -836,4 +837,3 @@ model Activity {
 
   dataset Dataset @relation(fields: [datasetId], references: [id])
 }
-
